@@ -4,7 +4,7 @@
 const port = Number(process.env.KIRO_OFFICE_PORT) || 4317;
 const url = `http://127.0.0.1:${port}/api/event`;
 
-const PROJECTS = ['/home/dev/softexpert/generic-core', '/home/dev/nutribee', '/home/dev/kiro-agents', '/home/dev/softexpert/portal'];
+const PROJECTS = ['/home/dev/stark/jarvis-core', '/home/dev/nutribee', '/home/dev/kiro-agents', '/home/dev/wayne/batcomputer'];
 const TOOLS = [
   ['fs_read', { path: 'src/main/java/App.java' }],
   ['grep', { pattern: 'TODO', path: 'src' }],
@@ -13,11 +13,11 @@ const TOOLS = [
   ['execute_bash', { command: 'npm test' }],
   ['execute_bash', { command: 'git status' }],
   ['web_fetch', { url: 'https://kiro.dev/docs/hooks/' }],
-  ['mcp_jira_get_issue', { query: 'GEN-1234' }],
-  ['subagent_generic-software-engineer', { explanation: 'Corrigir os achados de SAST' }],
+  ['mcp_jira_get_issue', { query: 'TITAN-1234' }],
+  ['subagent_stark-bruce-wayne', { explanation: 'Corrigir os achados de SAST' }],
   ['subagent_explorer', { explanation: 'Mapear o módulo de auth' }],
 ];
-const AGENTS = ['generic-tech-lead', 'reviewer', 'spec-writer', 'kiro_default'];
+const AGENTS = ['stark-sexta-feira', 'titan', 'curie', 'kiro_default'];
 const PROMPTS = ['implemente o endpoint de exportação', 'por que esse teste está falhando?', 'refatore o módulo de auth', 'escreva a steering de testes'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

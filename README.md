@@ -32,8 +32,8 @@ Os **balões de fala** mostram a ação atual: `lendo App.java`, `editando Butto
 ### Nomes
 
 - O **rótulo abaixo da mesa** é a pasta do projeto: o último trecho do `cwd`, com `#2`, `#3` se houver mais de uma sessão na mesma pasta.
-- A **plaquinha dourada na mesa** é o **agente** do Kiro (como `generic-tech-lead`). O Kiro CLI não manda esse nome nos hooks, então o servidor procura, nesta ordem:
-  1. `--agent <nome>` na linha de comando do `kiro-cli` (o hook sobe a árvore de processos para achar). É a fonte mais confiável; abra com `kiro-cli chat --agent generic-tech-lead`.
+- A **plaquinha dourada na mesa** é o **agente** do Kiro (como `stark-sexta-feira`). O Kiro CLI não manda esse nome nos hooks, então o servidor procura, nesta ordem:
+  1. `--agent <nome>` na linha de comando do `kiro-cli` (o hook sobe a árvore de processos para achar). É a fonte mais confiável; abra com `kiro-cli chat --agent stark-sexta-feira`.
   2. Um campo de agente no payload, ou uma variável de ambiente `*AGENT_NAME`.
   3. `session_state.agent_name` no arquivo de sessão (`~/.kiro/sessions/cli/`).
   4. O agente padrão, em `"chat.defaultAgent"` de `~/.kiro/settings/cli.json`.
@@ -42,13 +42,13 @@ Os **balões de fala** mostram a ação atual: `lendo App.java`, `editando Butto
 
 ### Subagentes
 
-No Kiro CLI, um subagente é chamado por uma ferramenta `subagent_<nome-do-agente>` (por exemplo `subagent_generic-software-engineer`) e **usa o mesmo `session_id` do pai**. Por isso o Kiro Office trata assim:
+No Kiro CLI, um subagente é chamado por uma ferramenta `subagent_<nome-do-agente>` (por exemplo `subagent_stark-bruce-wayne`) e **usa o mesmo `session_id` do pai**. Por isso o Kiro Office trata assim:
 
 - No `PreToolUse` de `subagent_*`, nasce um **filhote** da cor do pai, com o nome do agente (vindo do nome da ferramenta). Ele sai da mesa do pai junto com um aviãozinho de papel.
 - Enquanto o subagente está aberto, as ações que chegam nessa sessão são atribuídas ao filhote, não ao pai. O pai fica "Delegando", e o balão dele mostra a ação do filho (`↳ $ git status`).
 - No `PostToolUse` da mesma ferramenta `subagent_*`, o filhote voa até o pai com um papel, entrega o resultado e some.
 - Com **vários subagentes em paralelo** não dá para saber de qual é cada ação: os filhotes ficam "Trabalhando", as ações vão para o log do pai e pedidos de permissão aparecem no pai.
-- O nome do subagente aparece numa **etiqueta ao lado do filhote** e no balão do pai (`security-reviewer ↳ $ …`).
+- O nome do subagente aparece numa **etiqueta ao lado do filhote** e no balão do pai (`bruce-wayne ↳ $ …`).
 - Se o Kiro algum dia mandar subagentes com `session_id` próprio, o servidor também os vincula ao pai: por um campo de pai no payload, pelo arquivo de sessão ou por correlação com uma delegação aberta **no mesmo diretório** (só para ferramentas genéricas de delegação; uma sessão nova durante um `subagent_*` é sempre uma sessão independente).
 
 Os agentes não conversam entre si: o pai manda a tarefa e cada subagente devolve o resultado.
