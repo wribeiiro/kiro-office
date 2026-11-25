@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kiro Office</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Kiro Office</h1>
+      <span id="summary">0 agentes</span>
+      <span id="conn" class="conn off">desconectado</span>
+    </header>
+    <main>
+      <section class="stage">
+        <canvas id="office"></canvas>
+        <p id="empty" class="empty">
+          Nenhuma sessão ainda. Abra o <code>kiro-cli</code> (com os hooks instalados) ou rode <code>npm run demo</code>.
+        </p>
+      </section>
+      <aside id="panel"></aside>
+    </main>
+    <script src="/office.js"></script>
+  </body>
+</html>

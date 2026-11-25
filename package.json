@@ -1,0 +1,21 @@
+{
+  "name": "kiro-office",
+  "version": "0.1.0",
+  "description": "Escritório pixel-art local que mostra suas sessões do Kiro CLI como personagens animados, via hooks.",
+  "type": "module",
+  "bin": {
+    "kiro-office": "bin/kiro-office.js"
+  },
+  "scripts": {
+    "start": "node bin/kiro-office.js start",
+    "demo": "node scripts/demo.js",
+    "install-hooks": "node bin/kiro-office.js install-hooks",
+    "uninstall-hooks": "node bin/kiro-office.js uninstall-hooks",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": ["kiro", "kiro-cli", "hooks", "pixel-art", "agents"],
+  "license": "MIT"
+}

@@ -1,0 +1,96 @@
+:root {
+  --bg: #17141f;
+  --panel: #221d2e;
+  --line: #352d47;
+  --text: #ece6f7;
+  --muted: #9a90b0;
+  --accent: #9b6bff;
+  --warn: #ff5d6c;
+  --ok: #4fd18b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 { font-size: 16px; margin: 0; color: var(--accent); letter-spacing: 1px; }
+#summary { color: var(--muted); font-size: 13px; }
+.conn { margin-left: auto; font-size: 12px; padding: 3px 8px; border-radius: 10px; }
+.conn.on { background: #1d3b2c; color: var(--ok); }
+.conn.off { background: #3b1d24; color: var(--warn); }
+
+main {
+  display: flex;
+  gap: 20px;
+  padding: 20px;
+  align-items: flex-start;
+}
+
+.stage { position: relative; flex: 0 0 auto; }
+
+canvas {
+  display: block;
+  image-rendering: pixelated;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.empty {
+  position: absolute;
+  left: 0; right: 0; bottom: 18px;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: 90%;
+  padding: 8px 12px;
+  font-size: 12px;
+  background: rgba(23, 20, 31, 0.85);
+  border-radius: 6px;
+  color: var(--muted);
+}
+.empty.hidden { display: none; }
+
+aside {
+  flex: 1 1 320px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.card.selected { border-color: var(--accent); }
+.card.waiting { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn) inset; }
+
+.card .top { display: flex; align-items: center; gap: 8px; }
+.card .dot { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.card .name { font-weight: bold; font-size: 13px; }
+.card .state { margin-left: auto; color: var(--muted); }
+.card.waiting .state { color: var(--warn); font-weight: bold; }
+.card .cwd { color: var(--muted); margin: 4px 0; word-break: break-all; }
+.card .detail { margin: 4px 0; color: #d6c8ff; word-break: break-word; }
+.card ul { list-style: none; margin: 6px 0 0; padding: 0; color: var(--muted); }
+.card li { padding: 2px 0; border-top: 1px dashed var(--line); word-break: break-word; }
+.card li time { color: #6f6688; margin-right: 6px; }
+
+code { color: #d6c8ff; }
