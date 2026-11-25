@@ -103,8 +103,10 @@ export function describeKeys(obj, prefix = '', depth = 0, out = []) {
     if (Array.isArray(v)) {
       out.push({ key: keyPath, type: `array(${v.length})` });
       if (v[0] && typeof v[0] === 'object') describeKeys(v[0], `${keyPath}[0]`, depth + 1, out);
-    } else if (v && typeof v === 'object') {
-      out.push({ key: keyPath, type: 'object' });
+    } else if (v === null) {
+      out.push({ key: keyPath, type: 'null' });
+    } else if (typeof v === 'object') {
+      out.push({ key: keyPath, type: Object.keys(v).length ? 'object' : 'object(vazio)' });
       describeKeys(v, keyPath, depth + 1, out);
     } else {
       const entry = { key: keyPath, type: typeof v };

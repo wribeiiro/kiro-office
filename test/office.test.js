@@ -342,3 +342,14 @@ test('usa a description do execute_bash como nota legível', () => {
   assert.equal(r.state, 'read');
   assert.equal(r.note, '');
 });
+
+test('agente em session_state.agent_name (formato real do Kiro CLI) e null aparece como null', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-sessions-'));
+  fs.writeFileSync(path.join(dir, 'u1.json'), JSON.stringify({ session_id: 'u1', session_state: { agent_name: 'generic-tech-lead', goal: null } }));
+  assert.equal(findAgentName(JSON.parse(fs.readFileSync(path.join(dir, 'u1.json'), 'utf8'))), 'generic-tech-lead');
+  const store = new SessionStore({ sessionsDir: dir });
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'u1', cwd: '/x', tool_name: 'read_file' });
+  const keys = store.debug().sessions[0].sessionFileKeys;
+  assert.deepEqual(keys.find((k) => k.key === 'session_state.goal'), { key: 'session_state.goal', type: 'null' });
+  assert.equal(store.snapshot().sessions[0].agent, 'generic-tech-lead');
+});
