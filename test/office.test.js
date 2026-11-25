@@ -108,7 +108,7 @@ function runSend(port, payload, trigger) {
 }
 
 test('hook send.js entrega o evento ao servidor sem escrever no stdout', async () => {
-  const { server } = createOfficeServer();
+  const { server, close } = createOfficeServer();
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
   try {
@@ -121,7 +121,7 @@ test('hook send.js entrega o evento ao servidor sem escrever no stdout', async (
     const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     assert.match(html, /Kiro Office/);
   } finally {
-    server.close();
+    close();
   }
 });
 
@@ -186,4 +186,20 @@ test('pai explícito no payload ou no arquivo de sessão tem prioridade', () => 
   // pai encerrado → filhos órfãos somem
   store.apply({ hook_event_name: 'SessionEnd', session_id: 'p1' });
   assert.equal(byId('k8').state, 'leaving');
+});
+
+test('Ctrl+C encerra o servidor mesmo com o navegador conectado (SSE aberto)', async () => {
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'kiro-office.js'), 'start', '--port', String(port)]);
+  await new Promise((resolve) => child.stdout.on('data', (d) => String(d).includes('rodando') && resolve()));
+  const res = await fetch(`http://127.0.0.1:${port}/api/events`);
+  const reader = res.body.getReader();
+  await reader.read(); // conexão ao vivo estabelecida
+  const started = Date.now();
+  const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+  child.kill('SIGINT');
+  const code = await exited;
+  assert.equal(code, 0);
+  assert.ok(Date.now() - started < 1500, `demorou ${Date.now() - started}ms`);
+  await reader.cancel().catch(() => {});
 });

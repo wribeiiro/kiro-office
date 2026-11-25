@@ -89,11 +89,15 @@ export function createOfficeServer({ store = new SessionStore(), sweepMs = 1000 
   sweeper.unref();
   heartbeat.unref();
 
-  server.on('close', () => {
+  /** Encerra de verdade: fecha as conexões SSE abertas (senão server.close() espera para sempre). */
+  const close = (callback) => {
     clearInterval(sweeper);
     clearInterval(heartbeat);
     for (const res of clients) res.end();
-  });
+    clients.clear();
+    server.close(callback);
+    server.closeAllConnections?.();
+  };
 
-  return { server, store };
+  return { server, store, close };
 }

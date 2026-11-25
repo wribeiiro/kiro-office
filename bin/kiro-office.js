@@ -13,7 +13,7 @@ const workspace = flag('workspace');
 switch (cmd) {
   case 'start': {
     const port = Number(option('port') || process.env.KIRO_OFFICE_PORT) || 4317;
-    const { server } = createOfficeServer();
+    const { server, close } = createOfficeServer();
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') console.error(`A porta ${port} já está em uso. Use --port <n> (e KIRO_OFFICE_PORT nos hooks).`);
       else console.error(err);
@@ -25,7 +25,16 @@ switch (cmd) {
       if (installed.length === 0) console.log('Dica: os hooks globais ainda não foram instalados. Rode: kiro-office install-hooks');
       console.log('Ctrl+C para sair.');
     });
-    process.on('SIGINT', () => server.close(() => process.exit(0)));
+    let stopping = false;
+    const shutdown = () => {
+      if (stopping) process.exit(0); // segundo Ctrl+C: sai na hora
+      stopping = true;
+      console.log('\nEncerrando…');
+      close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref(); // garantia
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
     break;
   }
 
