@@ -473,6 +473,12 @@
 
   const base = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
 
+  /** "generic-security-reviewer" → "security-reviewer" (o nome completo fica na etiqueta e no painel). */
+  const shortAgent = (name) => {
+    const parts = String(name).split('-');
+    return parts.length > 2 ? parts.slice(1).join('-') : String(name);
+  };
+
   /** Texto curto da ação atual, mostrado no balão. */
   function actionText(s, t) {
     const d = s.detail || '';
@@ -497,9 +503,10 @@
       case 'delegate': {
         const open = kidsOf(s.id).filter((k) => k.state !== 'leaving');
         if (open.length === 1) {
+          // nome curto do subagente: sem o prefixo comum do time (ex.: "generic-")
+          const who = shortAgent(open[0].agent || open[0].name);
           const kidText = actionText(open[0], t);
-          const who = open[0].agent || open[0].name;
-          return kidText ? `↳ ${kidText}` : `delegando → ${who}`;
+          return kidText ? `${who} ↳ ${kidText}` : `delegando → ${who}`;
         }
         return open.length ? `delegando → ${open.length} sub` : 'delegando…';
       }
@@ -569,6 +576,21 @@
       px(x + 7, y + 3, 3, 1, '#a9a395');
       px(x + 7, y + 5, 3, 1, '#a9a395');
     }
+  }
+
+  /** Etiqueta pequena com o nome do subagente (cortada para caber na mesa). */
+  function drawKidTag(x, cy, text, maxX, color, stateColor) {
+    ctx.font = '5px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let label = text;
+    while (label.length > 4 && x + ctx.measureText(label).width + 6 > maxX) label = label.slice(0, -2) + '…';
+    const w = Math.ceil(ctx.measureText(label).width) + 6;
+    px(x, cy - 4, w, 8, 'rgba(23,20,31,0.88)');
+    px(x, cy - 4, 2, 8, color);
+    px(x + 2, cy + 3, w - 2, 1, stateColor || '#888');
+    ctx.fillStyle = '#ece6f7';
+    ctx.fillText(label, x + 4, cy + 0.5);
   }
 
   function drawPlane(pl, now) {
@@ -688,6 +710,18 @@
       ctx.globalAlpha = fadeIn * fadeOut;
       drawMiniGhost(a.x, a.y + Math.round(Math.sin(t / 300 + lk.phase)), lk, t, s);
       ctx.globalAlpha = 1;
+    }
+    // etiqueta com o nome do subagente ao lado do filhote mais recente de cada mesa
+    for (const p of topLevel()) {
+      const pa = actors.get(p.id);
+      if (!pa) continue;
+      const kids = kidsOf(p.id).filter((k) => k.state !== 'leaving' && actors.get(k.id));
+      if (!kids.length) continue;
+      const last = kids[kids.length - 1];
+      const ka = actors.get(last.id);
+      const { sx } = slotOrigin(pa.slot);
+      const name = last.agent || last.name;
+      drawKidTag(ka.x + MINI_W + 3, ka.y + 3, kids.length > 1 ? `${name} +${kids.length - 1}` : name, sx + SLOT_W - 1, look(last.id).body, STATE_COLORS[visualState(last)]);
     }
     for (const pl of planes) drawPlane(pl, now);
 
