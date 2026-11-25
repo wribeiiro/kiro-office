@@ -230,3 +230,17 @@ test('nome do agente vem do payload ou do arquivo de sessão (com nova tentativa
   store.apply({ hook_event_name: 'PostToolUse', session_id: 'b', tool_name: 'fs_read' });
   assert.equal(byId('b').agent, 'reviewer');
 });
+
+test('/api/debug mostra payloads e campos do arquivo de sessão sem vazar valores comuns', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-sessions-'));
+  fs.writeFileSync(path.join(dir, 's1.json'), JSON.stringify({ cwd: '/x', secret: 'tok', config: { agent_profile: 'dev' } }));
+  const store = new SessionStore({ sessionsDir: dir });
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 's1', cwd: '/x', tool_name: 'execute_bash' });
+  const d = store.debug();
+  assert.equal(d.sessionsDirExists, true);
+  assert.equal(d.recentPayloads[0].payload.tool_name, 'execute_bash');
+  const keys = d.sessions[0].sessionFileKeys;
+  assert.deepEqual(keys.find((k) => k.key === 'secret'), { key: 'secret', type: 'string' });
+  assert.equal(keys.find((k) => k.key === 'config.agent_profile').value, 'dev');
+  assert.equal(d.sessions[0].agent, 'dev');
+});

@@ -47,6 +47,12 @@ export function createOfficeServer({ store = new SessionStore(), sweepMs = 1000 
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/debug') {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(store.debug(), null, 2));
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/state') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(store.snapshot()));

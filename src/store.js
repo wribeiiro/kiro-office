@@ -64,16 +64,86 @@ function findParentKey(obj, depth) {
   return null;
 }
 
+const INTERESTING_KEY = /agent|name|profile|model|parent|session/i;
+
+/** Lista os caminhos de chave de um objeto (até 4 níveis), com valor só para chaves "interessantes". */
+export function describeKeys(obj, prefix = '', depth = 0, out = []) {
+  if (!obj || typeof obj !== 'object' || depth > 4 || out.length > 200) return out;
+  for (const [k, v] of Object.entries(obj)) {
+    const keyPath = prefix ? `${prefix}.${k}` : k;
+    if (Array.isArray(v)) {
+      out.push({ key: keyPath, type: `array(${v.length})` });
+      if (v[0] && typeof v[0] === 'object') describeKeys(v[0], `${keyPath}[0]`, depth + 1, out);
+    } else if (v && typeof v === 'object') {
+      out.push({ key: keyPath, type: 'object' });
+      describeKeys(v, keyPath, depth + 1, out);
+    } else {
+      const entry = { key: keyPath, type: typeof v };
+      if (INTERESTING_KEY.test(k) && (typeof v === 'string' || typeof v === 'number')) entry.value = String(v).slice(0, 80);
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+const truncateStrings = (value, depth = 0) => {
+  if (typeof value === 'string') return value.length > 200 ? value.slice(0, 200) + '…' : value;
+  if (!value || typeof value !== 'object' || depth > 5) return value;
+  if (Array.isArray(value)) return value.slice(0, 10).map((v) => truncateStrings(v, depth + 1));
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, truncateStrings(v, depth + 1)]));
+};
+
 export class SessionStore {
   constructor({ now = () => Date.now(), sessionsDir = DEFAULT_SESSIONS_DIR } = {}) {
     this.now = now;
     this.sessionsDir = sessionsDir;
     this.sessions = new Map();
+    this.recent = []; // últimos payloads recebidos (diagnóstico)
+  }
+
+  /** Dados para /api/debug: payloads crus, pasta de sessões e campos dos arquivos de sessão. */
+  debug() {
+    let dirExists = false;
+    let newestFiles = [];
+    try {
+      dirExists = !!this.sessionsDir && fs.statSync(this.sessionsDir).isDirectory();
+      if (dirExists) {
+        newestFiles = fs
+          .readdirSync(this.sessionsDir)
+          .map((f) => ({ f, m: fs.statSync(path.join(this.sessionsDir, f)).mtimeMs }))
+          .sort((a, b) => b.m - a.m)
+          .slice(0, 8)
+          .map(({ f }) => f);
+      }
+    } catch {
+      /* ignora */
+    }
+    return {
+      sessionsDir: this.sessionsDir,
+      sessionsDirExists: dirExists,
+      newestFilesInSessionsDir: newestFiles,
+      sessions: [...this.sessions.values()].map((s) => {
+        const file = this.sessionsDir ? path.join(this.sessionsDir, `${s.id}.json`) : null;
+        const data = readSessionFile(this.sessionsDir, s.id);
+        return {
+          id: s.id,
+          name: s.name,
+          agent: s.agent,
+          parentId: s.parentId,
+          sessionFile: file,
+          sessionFileFound: !!data,
+          sessionFileKeys: data ? describeKeys(data) : [],
+        };
+      }),
+      recentPayloads: this.recent,
+    };
   }
 
   /** Aplica um payload vindo do hook. Retorna true se o estado mudou. */
   apply(payload) {
     if (!payload || typeof payload !== 'object') return false;
+    this.recent.unshift({ t: this.now(), payload: truncateStrings(payload) });
+    if (this.recent.length > 15) this.recent.length = 15;
     const kind = normalizeEvent(payload.hook_event_name) ?? normalizeEvent(payload._event);
     if (!kind) return false;
 
