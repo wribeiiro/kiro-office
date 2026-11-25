@@ -472,13 +472,20 @@ export class SessionStore {
     const known = this.sessions.get(String(explicit || fromFile || ''));
     if (known && known.id !== id) return known;
 
+    // Correlação por tempo: só no MESMO diretório e só quando o pai delega por uma ferramenta
+    // genérica. Com subagent_* (Kiro CLI) os filhos já são virtuais, e uma sessão nova
+    // é outra sessão de verdade, não um subagente.
     const open = [...this.sessions.values()].filter(
-      (p) => !p.parentId && p.delegatingSince != null && t - p.delegatingSince < DELEGATION_WINDOW_MS && p.state !== 'leaving',
+      (p) =>
+        !p.parentId &&
+        p.delegatingSince != null &&
+        t - p.delegatingSince < DELEGATION_WINDOW_MS &&
+        p.state !== 'leaving' &&
+        p.cwd &&
+        p.cwd === cwd &&
+        !/^subagent_/i.test(p.tool || ''),
     );
-    if (open.length === 0) return null;
-    const sameCwd = open.filter((p) => p.cwd && p.cwd === cwd);
-    const pool = sameCwd.length ? sameCwd : open.length === 1 ? open : [];
-    return pool.sort((a, b) => b.delegatingSince - a.delegatingSince)[0] ?? null;
+    return open.sort((a, b) => b.delegatingSince - a.delegatingSince)[0] ?? null;
   }
 
   /** O pai recebeu os resultados: os filhos voam até ele, entregam e somem. */

@@ -394,3 +394,20 @@ test('send.js acha --agent subindo a árvore de processos', { skip: process.plat
     close();
   }
 });
+
+test('sessão nova em outra pasta ou durante subagent_* não vira filha de quem está delegando', () => {
+  let now = 0;
+  const store = new SessionStore({ now: () => now, sessionsDir: null });
+  const byId = (id) => store.snapshot().sessions.find((s) => s.id === id);
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'p', cwd: '/a', tool_name: 'subagent_explorer' });
+  now += 100;
+  store.apply({ hook_event_name: 'SessionStart', session_id: 'outra', cwd: '/b' });
+  store.apply({ hook_event_name: 'SessionStart', session_id: 'mesma-pasta', cwd: '/a' });
+  assert.equal(byId('outra').parentId, null);
+  assert.equal(byId('mesma-pasta').parentId, null);
+
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'q', cwd: '/c', tool_name: 'use_subagent' });
+  now += 100;
+  store.apply({ hook_event_name: 'SessionStart', session_id: 'longe', cwd: '/d' });
+  assert.equal(byId('longe').parentId, null);
+});
