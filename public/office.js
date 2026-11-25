@@ -495,8 +495,13 @@
       case 'mcp':
         return `mcp ${tool.replace(/^mcp_/, '').replace('_', ':')}`;
       case 'delegate': {
-        const n = kidsOf(s.id).filter((k) => k.state !== 'leaving').length;
-        return n ? `delegando → ${n} sub` : 'delegando…';
+        const open = kidsOf(s.id).filter((k) => k.state !== 'leaving');
+        if (open.length === 1) {
+          const kidText = actionText(open[0], t);
+          const who = open[0].agent || open[0].name;
+          return kidText ? `↳ ${kidText}` : `delegando → ${who}`;
+        }
+        return open.length ? `delegando → ${open.length} sub` : 'delegando…';
       }
       case 'work':
         return tool || 'trabalhando';

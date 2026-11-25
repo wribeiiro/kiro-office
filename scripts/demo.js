@@ -14,11 +14,10 @@ const TOOLS = [
   ['execute_bash', { command: 'git status' }],
   ['web_fetch', { url: 'https://kiro.dev/docs/hooks/' }],
   ['mcp_jira_get_issue', { query: 'GEN-1234' }],
-  ['use_subagent', { query: 'revisar a PR' }],
-  ['use_subagent', { query: 'investigar testes falhando' }],
+  ['subagent_generic-software-engineer', { explanation: 'Corrigir os achados de SAST' }],
+  ['subagent_explorer', { explanation: 'Mapear o módulo de auth' }],
 ];
-const AGENTS = ['dev-agent', 'reviewer', 'spec-writer', 'kiro_default'];
-const SUB_AGENTS = ['explorer', 'tester', 'doc-reader'];
+const AGENTS = ['generic-tech-lead', 'reviewer', 'spec-writer', 'kiro_default'];
 const PROMPTS = ['implemente o endpoint de exportação', 'por que esse teste está falhando?', 'refatore o módulo de auth', 'escreva a steering de testes'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,26 +28,16 @@ const post = (body) =>
     process.exit(1);
   });
 
-/** Subagentes em paralelo: sessões novas no mesmo cwd, logo depois do use_subagent do pai. */
-async function runSubagents(cwd, n) {
-  const SUB_TOOLS = TOOLS.filter(([t]) => t !== 'use_subagent');
-  await Promise.all(
-    Array.from({ length: n }, async (_, k) => {
-      const session_id = `sub-${k}-${Math.random().toString(36).slice(2, 8)}`;
-      const agent_name = SUB_AGENTS[k % SUB_AGENTS.length];
-      const ev = (hook_event_name, extra = {}) => post({ hook_event_name, session_id, cwd, agent_name, ...extra });
-      await sleep(300 + k * 400);
-      await ev('SessionStart');
-      for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
-        const [tool_name, tool_input] = pick(SUB_TOOLS);
-        await ev('PreToolUse', { tool_name, tool_input });
-        await sleep(1800 + Math.random() * 2200);
-        await ev('PostToolUse', { tool_name, tool_input });
-      }
-      await ev('Stop');
-    }),
-  );
-  await sleep(800);
+/** Como no Kiro CLI: o subagente usa o mesmo session_id do pai até o PostToolUse da ferramenta subagent_*. */
+async function runSubagent(ev) {
+  const SUB_TOOLS = TOOLS.filter(([t]) => !t.startsWith('subagent_'));
+  for (let j = 0; j < 3 + Math.floor(Math.random() * 3); j++) {
+    const [tool_name, tool_input] = pick(SUB_TOOLS);
+    await ev('PreToolUse', { tool_name, tool_input });
+    await sleep(1800 + Math.random() * 2200);
+    await ev('PostToolUse', { tool_name, tool_input });
+  }
+  await sleep(600);
 }
 
 async function runSession(i) {
@@ -72,7 +61,7 @@ async function runSession(i) {
         await ev('PermissionRequest', { tool_name, tool_input });
         await sleep(4000);
       }
-      if (tool_name === 'use_subagent') await runSubagents(cwd, 2 + Math.floor(Math.random() * 2));
+      if (tool_name.startsWith('subagent_')) await runSubagent(ev);
       else await sleep(1500 + Math.random() * 2000);
       await ev('PostToolUse', { tool_name, tool_input });
       await sleep(600);

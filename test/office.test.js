@@ -244,3 +244,85 @@ test('/api/debug mostra payloads e campos do arquivo de sessão sem vazar valore
   assert.equal(keys.find((k) => k.key === 'config.agent_profile').value, 'dev');
   assert.equal(d.sessions[0].agent, 'dev');
 });
+
+test('subagente do Kiro CLI com o mesmo session_id do pai vira filhote virtual', () => {
+  let now = 1000;
+  const store = new SessionStore({ now: () => now, sessionsDir: null });
+  const sid = 'sess_0e15ac9d';
+  const cwd = '/root/code/repo/System/web';
+  const ev = (hook_event_name, extra = {}) => {
+    now += 100;
+    store.apply({ hook_event_name, session_id: sid, cwd, ...extra });
+  };
+  const all = () => store.snapshot().sessions;
+  const parent = () => all().find((s) => s.id === sid);
+
+  ev('UserPromptSubmit', { prompt: 'siga o padrão do orphancleaner' });
+  ev('PreToolUse', {
+    tool_name: 'subagent_generic-software-engineer',
+    tool_input: { explanation: 'Corrigir os 5 achados de SAST', prompt: 'Tarefa longa…' },
+  });
+  let kid = all().find((s) => s.parentId === sid);
+  assert.ok(kid, 'filhote criado');
+  assert.equal(kid.virtual, true);
+  assert.equal(kid.agent, 'generic-software-engineer');
+  assert.equal(kid.detail, 'Corrigir os 5 achados de SAST');
+  assert.equal(parent().state, 'delegate');
+
+  // ações seguintes no mesmo session_id são do subagente
+  ev('PreToolUse', { tool_name: 'execute_bash', tool_input: { command: 'git branch --show-current' } });
+  kid = all().find((s) => s.parentId === sid);
+  assert.equal(kid.state, 'shell');
+  assert.equal(kid.detail, 'git branch --show-current');
+  assert.equal(parent().state, 'delegate');
+  ev('PostToolUse', { tool_name: 'execute_bash' });
+  assert.equal(parent().state, 'delegate');
+
+  // resultado volta ao pai
+  ev('PostToolUse', { tool_name: 'subagent_generic-software-engineer' });
+  kid = all().find((s) => s.parentId === sid);
+  assert.equal(kid.state, 'leaving');
+  assert.equal(kid.returning, true);
+  assert.equal(parent().state, 'thinking');
+  assert.equal(parent().delegatingSince, null);
+
+  // depois disso, ações voltam a ser do pai
+  ev('PreToolUse', { tool_name: 'fs_read', tool_input: { operations: [{ path: 'a.java' }] } });
+  assert.equal(parent().state, 'read');
+});
+
+test('vários subagentes virtuais em paralelo ficam "trabalhando" e a permissão vai para o pai', () => {
+  let now = 0;
+  const store = new SessionStore({ now: () => now, sessionsDir: null });
+  const ev = (hook_event_name, extra = {}) => {
+    now += 10;
+    store.apply({ hook_event_name, session_id: 'p', cwd: '/x', ...extra });
+  };
+  ev('PreToolUse', { tool_name: 'subagent_explorer' });
+  ev('PreToolUse', { tool_name: 'subagent_tester' });
+  ev('PreToolUse', { tool_name: 'execute_bash', tool_input: { command: 'ls' } });
+  const kids = store.snapshot().sessions.filter((s) => s.parentId === 'p');
+  assert.equal(kids.length, 2);
+  assert.ok(kids.every((k) => k.state === 'work'));
+  ev('PermissionRequest', { tool_name: 'execute_bash' });
+  assert.equal(store.snapshot().sessions.find((s) => s.id === 'p').state, 'waiting');
+  ev('PostToolUse', { tool_name: 'subagent_tester' });
+  const tester = store.snapshot().sessions.find((s) => s.agent === 'tester');
+  assert.equal(tester.state, 'leaving');
+  ev('UserPromptSubmit', { prompt: 'outra coisa' });
+  assert.ok(store.snapshot().sessions.filter((s) => s.parentId === 'p').every((k) => k.state === 'leaving'));
+});
+
+test('agente principal vem das variáveis KIRO_* ou de <id sem sess_>.json / .history', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-sessions-'));
+  fs.writeFileSync(path.join(dir, 'abc.json'), JSON.stringify({ agent_name: 'generic-tech-lead' }));
+  fs.writeFileSync(path.join(dir, 'sess_hist.history'), '{"type":"x"}\n{"agent":{"name":"reviewer"}}\n');
+  const store = new SessionStore({ sessionsDir: dir });
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'sess_abc', cwd: '/a', tool_name: 'fs_read' });
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'sess_hist', cwd: '/b', tool_name: 'fs_read' });
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'sess_env', cwd: '/c', tool_name: 'fs_read', _env: { KIRO_AGENT_NAME: 'dev-agent' } });
+  const agentOf = (id) => store.snapshot().sessions.find((s) => s.id === id).agent;
+  assert.equal(agentOf('sess_abc'), 'generic-tech-lead');
+  assert.equal(agentOf('sess_hist'), 'reviewer');
+  assert.equal(agentOf('sess_env'), 'dev-agent');
+});

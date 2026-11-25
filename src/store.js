@@ -16,13 +16,42 @@ const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.kiro', 'sessions', 'cli')
  * (~/.kiro/sessions/cli/<id>.json). O nome exato do campo não é documentado,
  * então aceita qualquer chave "parent…id" com valor string.
  */
-export function readSessionFile(sessionsDir, id) {
-  if (!sessionsDir || !/^[\w.-]+$/.test(id)) return null;
+/** Arquivos que podem descrever a sessão: <id>.json, <id sem "sess_">.json e <id>.history. */
+export function sessionFileCandidates(sessionsDir, id) {
+  if (!sessionsDir || !/^[\w.-]+$/.test(id)) return [];
+  const bare = id.replace(/^sess_/, '');
+  const names = [`${id}.json`, `${bare}.json`, `${id}.history`, `${bare}.history`];
+  return [...new Set(names)].map((n) => path.join(sessionsDir, n));
+}
+
+/** Lê um arquivo JSON, ou JSON Lines (usa até as 20 primeiras linhas como lista). */
+export function parseJsonish(raw) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf8'));
+    return JSON.parse(raw);
   } catch {
-    return null;
+    const lines = raw.split('\n').filter((l) => l.trim()).slice(0, 20);
+    const parsed = [];
+    for (const l of lines) {
+      try {
+        parsed.push(JSON.parse(l));
+      } catch {
+        /* linha não é JSON */
+      }
+    }
+    return parsed.length ? { lines: parsed } : null;
   }
+}
+
+export function readSessionFile(sessionsDir, id) {
+  for (const file of sessionFileCandidates(sessionsDir, id)) {
+    try {
+      const data = parseJsonish(fs.readFileSync(file, 'utf8').slice(0, 512 * 1024));
+      if (data) return data;
+    } catch {
+      /* não existe */
+    }
+  }
+  return null;
 }
 
 export function readParentFromSessionFile(sessionsDir, id) {
@@ -112,7 +141,7 @@ export class SessionStore {
           .readdirSync(this.sessionsDir)
           .map((f) => ({ f, m: fs.statSync(path.join(this.sessionsDir, f)).mtimeMs }))
           .sort((a, b) => b.m - a.m)
-          .slice(0, 8)
+          .slice(0, 30)
           .map(({ f }) => f);
       }
     } catch {
@@ -123,17 +152,28 @@ export class SessionStore {
       sessionsDirExists: dirExists,
       newestFilesInSessionsDir: newestFiles,
       sessions: [...this.sessions.values()].map((s) => {
-        const file = this.sessionsDir ? path.join(this.sessionsDir, `${s.id}.json`) : null;
-        const data = readSessionFile(this.sessionsDir, s.id);
+        const candidates = sessionFileCandidates(this.sessionsDir, s.id).map((f) => ({ file: f, exists: fs.existsSync(f) }));
+        const data = s.virtual ? null : readSessionFile(this.sessionsDir, s.id);
         return {
           id: s.id,
           name: s.name,
           agent: s.agent,
           parentId: s.parentId,
-          sessionFile: file,
-          sessionFileFound: !!data,
+          virtual: s.virtual,
+          sessionFileCandidates: candidates,
           sessionFileKeys: data ? describeKeys(data) : [],
         };
+      }),
+      // estrutura (chaves) do .json e do .history mais recentes da pasta, para descobrir o formato
+      sampleFiles: ['.json', '.history', '.jsonl'].map((ext) => {
+        const name = newestFiles.find((f) => f.endsWith(ext));
+        if (!name) return { ext, file: null };
+        try {
+          const data = parseJsonish(fs.readFileSync(path.join(this.sessionsDir, name), 'utf8').slice(0, 512 * 1024));
+          return { ext, file: name, keys: data ? describeKeys(data).slice(0, 120) : 'não é JSON' };
+        } catch (e) {
+          return { ext, file: name, error: String(e.message) };
+        }
       }),
       recentPayloads: this.recent,
     };
@@ -159,14 +199,43 @@ export class SessionStore {
     if (cwd && !s.cwd) s.cwd = cwd;
     this.#resolveAgent(s, payload, t);
 
-    const setState = (state) => {
-      if (s.state !== state) s.stateAt = t;
-      s.state = state;
-    };
-    const log = (text) => {
-      s.log.unshift({ t, text });
-      if (s.log.length > MAX_LOG) s.log.length = MAX_LOG;
-    };
+    // No Kiro CLI, o subagente usa o MESMO session_id do pai. Enquanto houver um subagente
+    // aberto, as ações que chegam nessa sessão são dele, não do pai (que está esperando).
+    const tool = String(payload.tool_name ?? payload.toolName ?? '');
+    const isDelegateCall = (kind === 'pre_tool' || kind === 'post_tool') && toolCategory(tool) === 'delegate';
+    const open = this.#openVirtualKids(s);
+    if (open.length && !isDelegateCall && ['pre_tool', 'post_tool', 'permission', 'stop'].includes(kind)) {
+      if (open.length === 1) {
+        this.#applyEvent(open[0], kind, payload, t);
+      } else {
+        // vários subagentes em paralelo: não dá para saber de qual é a ação
+        for (const k of open) this.#setState(k, 'work', t);
+        if (kind === 'pre_tool') this.#log(s, t, `subagentes: ${tool}${summarizeInput(payload.tool_input) ? ` · ${summarizeInput(payload.tool_input)}` : ''}`);
+        if (kind === 'permission') this.#applyEvent(s, kind, payload, t);
+      }
+      s.updatedAt = t;
+      return true;
+    }
+
+    this.#applyEvent(s, kind, payload, t);
+    return true;
+  }
+
+  #setState(s, state, t) {
+    if (s.state !== state) s.stateAt = t;
+    s.state = state;
+  }
+
+  #log(s, t, text) {
+    s.log.unshift({ t, text });
+    if (s.log.length > MAX_LOG) s.log.length = MAX_LOG;
+  }
+
+  /** Aplica um evento a uma sessão (real ou subagente virtual). */
+  #applyEvent(s, kind, payload, t) {
+    const setState = (state) => this.#setState(s, state, t);
+    const log = (text) => this.#log(s, t, text);
+    const tool = String(payload.tool_name ?? payload.toolName ?? '');
 
     switch (kind) {
       case 'start':
@@ -174,36 +243,55 @@ export class SessionStore {
         log(s.parentId ? 'Subagente iniciado' : 'Sessão iniciada');
         break;
       case 'prompt':
+        // o usuário voltou a falar com o agente principal: qualquer delegação acabou
+        this.#finishDelegation(s, t);
         setState('thinking');
         s.tool = '';
         s.detail = summarizeInput(payload.prompt ?? payload.user_prompt ?? '', 120);
         log(s.detail ? `Prompt: ${s.detail}` : 'Novo prompt');
         break;
       case 'pre_tool': {
-        const tool = String(payload.tool_name ?? payload.toolName ?? '');
         const category = toolCategory(tool);
         setState(category);
         s.tool = tool;
         s.detail = summarizeInput(payload.tool_input ?? payload.toolInput);
-        if (category === 'delegate') s.delegatingSince = t;
         log(`${tool || 'ferramenta'}${s.detail ? ` · ${s.detail}` : ''}`);
+        if (category === 'delegate') {
+          s.delegatingSince = t;
+          if (/^subagent_/i.test(tool)) this.#createVirtualKid(s, tool, payload, t);
+        }
         break;
       }
       case 'post_tool':
-        if (s.delegatingSince != null && toolCategory(payload.tool_name ?? s.tool) === 'delegate') {
-          this.#finishDelegation(s, t);
-          log('Resultados dos subagentes recebidos');
+        if (toolCategory(tool || s.tool) === 'delegate' && !s.virtual) {
+          const kid = this.#openVirtualKids(s).find((k) => k.delegateTool === tool);
+          if (kid) this.#finishKid(kid, t);
+          else this.#finishDelegation(s, t);
+          log(kid ? `Resultado de ${kid.agent || kid.name} recebido` : 'Resultados dos subagentes recebidos');
+          if (this.#openVirtualKids(s).length) {
+            setState('delegate');
+            break;
+          }
+          s.delegatingSince = null;
         }
         setState('thinking');
         break;
       case 'permission':
         setState('waiting');
-        s.tool = String(payload.tool_name ?? s.tool ?? '');
+        s.tool = tool || s.tool;
         s.detail = summarizeInput(payload.tool_input ?? payload.permission?.command ?? s.detail);
         log(`Aguardando permissão: ${s.tool}`);
         break;
       case 'stop':
-        if (s.delegatingSince != null) this.#finishDelegation(s, t);
+        if (s.virtual) {
+          // subagente terminou o próprio turno; entrega quando o pai receber o resultado
+          setState('done');
+          s.tool = '';
+          s.detail = '';
+          log('Subagente concluiu');
+          break;
+        }
+        this.#finishDelegation(s, t);
         setState('done');
         s.tool = '';
         s.detail = '';
@@ -216,7 +304,38 @@ export class SessionStore {
         break;
     }
     s.updatedAt = t;
-    return true;
+  }
+
+  /** Subagente do Kiro CLI (mesmo session_id do pai): vira um filhote "virtual". */
+  #createVirtualKid(parent, tool, payload, t) {
+    parent.kidCounter += 1;
+    const input = payload.tool_input ?? {};
+    const kid = this.#blank(`${parent.id}#${parent.kidCounter}`, parent.cwd, t);
+    kid.parentId = parent.id;
+    kid.virtual = true;
+    kid.delegateTool = tool;
+    kid.name = `sub ${parent.kidCounter}`;
+    kid.agent = tool.replace(/^subagent_/i, '') || null;
+    kid.state = 'thinking';
+    kid.detail = summarizeInput(input.explanation ?? input.prompt ?? input, 120);
+    kid.log.unshift({ t, text: `Tarefa: ${kid.detail || tool}` });
+    this.sessions.set(kid.id, kid);
+    return kid;
+  }
+
+  #openVirtualKids(parent) {
+    if (parent.virtual) return [];
+    const out = [];
+    for (const k of this.sessions.values()) if (k.virtual && k.parentId === parent.id && k.state !== 'leaving') out.push(k);
+    return out;
+  }
+
+  #finishKid(kid, t) {
+    kid.state = 'leaving';
+    kid.stateAt = t;
+    kid.returning = true;
+    kid.updatedAt = t;
+    kid.log.unshift({ t, text: 'Resultado entregue ao agente principal' });
   }
 
   /** Remove sessões encerradas, abandonadas ou subagentes órfãos. Retorna true se algo mudou. */
@@ -243,13 +362,14 @@ export class SessionStore {
     };
   }
 
-  #create(id, cwd, payload, t) {
-    const parent = this.#findParent(id, cwd, payload, t);
-    const s = {
+  #blank(id, cwd, t) {
+    return {
       id,
       cwd,
       name: '',
-      parentId: parent?.id ?? null,
+      parentId: null,
+      virtual: false,
+      delegateTool: null,
       state: 'idle',
       tool: '',
       detail: '',
@@ -263,6 +383,12 @@ export class SessionStore {
       agent: null,
       agentCheckedAt: -Infinity,
     };
+  }
+
+  #create(id, cwd, payload, t) {
+    const parent = this.#findParent(id, cwd, payload, t);
+    const s = this.#blank(id, cwd, t);
+    s.parentId = parent?.id ?? null;
     if (parent) {
       parent.kidCounter += 1;
       s.name = `sub ${parent.kidCounter}`;
@@ -278,17 +404,18 @@ export class SessionStore {
   /** Nome do agente: primeiro no payload do hook, depois no arquivo de sessão do Kiro (com nova tentativa). */
   #resolveAgent(s, payload, t) {
     if (s.agent) return;
-    const fromPayload = findAgentName(
-      { agent_name: payload.agent_name, agentName: payload.agentName, agent: payload.agent },
-      0,
-    );
+    const env = payload._env && typeof payload._env === 'object' ? payload._env : {};
+    const envAgent = Object.entries(env).find(([k, v]) => /AGENT/i.test(k) && typeof v === 'string' && v.trim());
+    const fromPayload =
+      findAgentName({ agent_name: payload.agent_name, agentName: payload.agentName, agent: payload.agent }, 0) ??
+      (envAgent ? envAgent[1].trim().slice(0, 40) : null);
     if (fromPayload) {
       s.agent = fromPayload;
       return;
     }
     if (!this.sessionsDir || t - s.agentCheckedAt < AGENT_RETRY_MS) return;
     s.agentCheckedAt = t;
-    s.agent = findAgentName(readSessionFile(this.sessionsDir, s.id));
+    if (!s.virtual) s.agent = findAgentName(readSessionFile(this.sessionsDir, s.id));
   }
 
   #findParent(id, cwd, payload, t) {
@@ -310,12 +437,7 @@ export class SessionStore {
   #finishDelegation(parent, t) {
     parent.delegatingSince = null;
     for (const kid of this.sessions.values()) {
-      if (kid.parentId !== parent.id || kid.state === 'leaving') continue;
-      kid.state = 'leaving';
-      kid.stateAt = t;
-      kid.returning = true;
-      kid.updatedAt = t;
-      kid.log.unshift({ t, text: 'Resultado entregue ao agente principal' });
+      if (kid.parentId === parent.id && kid.state !== 'leaving') this.#finishKid(kid, t);
     }
   }
 

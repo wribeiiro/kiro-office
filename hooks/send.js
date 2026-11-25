@@ -34,6 +34,12 @@ function send() {
   payload._event = trigger;
   if (!payload.cwd) payload.cwd = process.cwd();
   if (process.env.USER_PROMPT && payload.prompt == null) payload.prompt = process.env.USER_PROMPT.slice(0, 1000);
+  // variáveis KIRO_* do ambiente do hook (sem nada que pareça credencial), para achar o nome do agente
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (/^(KIRO|Q)_/i.test(k) && !/(TOKEN|SECRET|KEY|PASS|AUTH|CRED|COOKIE)/i.test(k)) env[k] = String(v).slice(0, 120);
+  }
+  if (Object.keys(env).length) payload._env = env;
 
   const body = JSON.stringify(payload);
   const req = http.request(

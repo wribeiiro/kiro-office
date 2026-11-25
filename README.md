@@ -32,20 +32,29 @@ Os **balões de fala** mostram a ação atual: `lendo App.java`, `editando Butto
 ### Nomes
 
 - O **rótulo abaixo da mesa** é a pasta do projeto: o último trecho do `cwd`, com `#2`, `#3` se houver mais de uma sessão na mesma pasta.
-- A **plaquinha dourada na mesa** é o **agente** do Kiro (o perfil, como `kiro_default` ou um agente customizado). O servidor procura o nome em `agent_name` / `agentName` / `agent` no payload do hook e, se não achar, no arquivo `~/.kiro/sessions/cli/<session_id>.json`. Ele tenta de novo a cada 5 s, caso o arquivo ainda não exista no início da sessão. Se não encontrar, a plaquinha simplesmente não aparece.
+- A **plaquinha dourada na mesa** é o **agente** do Kiro (o perfil, como `kiro_default` ou um agente customizado). O servidor procura o nome em `agent_name` / `agentName` / `agent` no payload do hook e, se não achar, no arquivo `~/.kiro/sessions/cli/<session_id>.json`. Também aceita variáveis de ambiente `KIRO_*AGENT*` do processo do hook, e procura em `<id>.json`, `<id sem sess_>.json` e `<id>.history`. Tenta de novo a cada 5 s, caso o arquivo ainda não exista no início da sessão. Se não encontrar, a plaquinha simplesmente não aparece.
 
 ### Subagentes
 
-Quando um agente delega, cada subagente vira um **filhote** da mesma cor do pai. O filhote nasce da mesa do pai, com um aviãozinho de papel levando a tarefa, e fica na frente da mesa ligado ao pai por uma linha pontilhada. No painel lateral, os filhotes aparecem aninhados no card do pai, cada um com a sua ação. Quando o pai recebe os resultados (`PostToolUse` da ferramenta de subagente), os filhotes voam até ele carregando um papel, entregam e somem.
+No Kiro CLI, um subagente é chamado por uma ferramenta `subagent_<nome-do-agente>` (por exemplo `subagent_generic-software-engineer`) e **usa o mesmo `session_id` do pai**. Por isso o Kiro Office trata assim:
 
-Para saber quem é pai de quem, o servidor tenta, nesta ordem:
-1. um campo de pai no payload do hook (`parent_session_id`, `parentSessionId` ou `parent_id`), se o Kiro enviar;
-2. o arquivo da sessão em `~/.kiro/sessions/cli/<session_id>.json`, procurando um campo `parent…id`;
-3. **correlação por tempo:** uma sessão nova que aparece enquanto outra, no mesmo diretório, está com uma delegação aberta é considerada filha dela.
+- No `PreToolUse` de `subagent_*`, nasce um **filhote** da cor do pai, com o nome do agente (vindo do nome da ferramenta). Ele sai da mesa do pai junto com um aviãozinho de papel.
+- Enquanto o subagente está aberto, as ações que chegam nessa sessão são atribuídas ao filhote, não ao pai. O pai fica "Delegando", e o balão dele mostra a ação do filho (`↳ $ git status`).
+- No `PostToolUse` da mesma ferramenta `subagent_*`, o filhote voa até o pai com um papel, entrega o resultado e some.
+- Com **vários subagentes em paralelo** não dá para saber de qual é cada ação: os filhotes ficam "Trabalhando", as ações vão para o log do pai e pedidos de permissão aparecem no pai.
+- Se o Kiro algum dia mandar subagentes com `session_id` próprio, o servidor também os vincula ao pai: por um campo de pai no payload, pelo arquivo de sessão ou por correlação com a delegação aberta.
 
-Limitação: os filhotes só aparecem se os hooks globais dispararem dentro dos subagentes com um `session_id` próprio. Se não dispararem, o pai mostra só `delegando…`. Uma sessão nova aberta no mesmo projeto enquanto outra está delegando pode ser confundida com um filho.
+Os agentes não conversam entre si: o pai manda a tarefa e cada subagente devolve o resultado.
 
-Os agentes não conversam entre si: no Kiro, o pai manda a tarefa e cada subagente devolve o resultado ao pai.
+### Diagnóstico
+
+`http://127.0.0.1:4317/api/debug` mostra:
+- os últimos payloads recebidos dos hooks;
+- a pasta de sessões do Kiro que o servidor está usando;
+- os arquivos candidatos de cada sessão;
+- a estrutura (chaves) dos arquivos `.json`, `.history` e `.jsonl` mais recentes. Valores aparecem só para chaves como `agent`, `name`, `model` e `parent`.
+
+Use quando algo não aparecer como esperado.
 
 ## Requisitos
 
