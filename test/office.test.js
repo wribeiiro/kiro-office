@@ -326,3 +326,19 @@ test('agente principal vem das variáveis KIRO_* ou de <id sem sess_>.json / .hi
   assert.equal(agentOf('sess_hist'), 'reviewer');
   assert.equal(agentOf('sess_env'), 'dev-agent');
 });
+
+test('usa a description do execute_bash como nota legível', () => {
+  const store = new SessionStore({ sessionsDir: null });
+  store.apply({
+    hook_event_name: 'PreToolUse', session_id: 'a', cwd: '/x', tool_name: 'execute_bash',
+    tool_input: { command: 'nohup mvn -o clean install > /tmp/x.log 2>&1 &', description: 'Start Maven build in background' },
+  });
+  const s = store.snapshot().sessions[0];
+  assert.equal(s.state, 'shell');
+  assert.equal(s.note, 'Start Maven build in background');
+  assert.match(s.detail, /^nohup mvn/);
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'a', tool_name: 'read_file', tool_input: { path: '/r/report.md' } });
+  const r = store.snapshot().sessions[0];
+  assert.equal(r.state, 'read');
+  assert.equal(r.note, '');
+});

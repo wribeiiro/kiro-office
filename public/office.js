@@ -485,7 +485,7 @@
       case 'write':
         return `editando ${base(d) || tool}`;
       case 'shell':
-        return `$ ${d || tool}`;
+        return s.note ? `$ ${s.note}` : `$ ${d || tool}`;
       case 'web':
         try {
           return `web ${new URL(d).host}`;
@@ -745,7 +745,9 @@
       (waiting ? ` · ${waiting} aguardando você` : '');
     empty.classList.toggle('hidden', sessions.length > 0);
 
-    const detailOf = (s) => (s.tool || s.detail ? `${esc(s.tool)}${s.tool && s.detail ? ' · ' : ''}${esc(s.detail)}` : '');
+    const detailOf = (s) =>
+      (s.note ? `<b>${esc(s.note)}</b><br>` : '') +
+      (s.tool || s.detail ? `${esc(s.tool)}${s.tool && s.detail ? ' · ' : ''}${esc(s.detail)}` : '');
     panel.innerHTML = tops
       .map((s) => {
         const state = panelState(s);

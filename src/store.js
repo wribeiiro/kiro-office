@@ -247,6 +247,7 @@ export class SessionStore {
         this.#finishDelegation(s, t);
         setState('thinking');
         s.tool = '';
+        s.note = '';
         s.detail = summarizeInput(payload.prompt ?? payload.user_prompt ?? '', 120);
         log(s.detail ? `Prompt: ${s.detail}` : 'Novo prompt');
         break;
@@ -255,7 +256,10 @@ export class SessionStore {
         setState(category);
         s.tool = tool;
         s.detail = summarizeInput(payload.tool_input ?? payload.toolInput);
-        log(`${tool || 'ferramenta'}${s.detail ? ` · ${s.detail}` : ''}`);
+        // o Kiro manda uma descrição curta junto do comando ("Start Maven build in background")
+        const input = payload.tool_input ?? payload.toolInput;
+        s.note = input && typeof input.description === 'string' ? summarizeInput(input.description, 80) : '';
+        log(`${s.note || tool || 'ferramenta'}${s.detail ? ` · ${s.detail}` : ''}`);
         if (category === 'delegate') {
           s.delegatingSince = t;
           if (/^subagent_/i.test(tool)) this.#createVirtualKid(s, tool, payload, t);
@@ -370,6 +374,7 @@ export class SessionStore {
       parentId: null,
       virtual: false,
       delegateTool: null,
+      note: '',
       state: 'idle',
       tool: '',
       detail: '',
