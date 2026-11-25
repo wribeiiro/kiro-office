@@ -64,6 +64,13 @@
   };
   const GHOST_FRAMES = HEMS.map((hem) => [...GHOST, ...hem].map(toRuns));
 
+  // Filhote (subagente) 8×8
+  const MINI = ['..####..', '.######.', '########', '########', '########', '########'];
+  const MINI_HEMS = ['##.##.##', '#.##.##.'];
+  const MINI_FRAMES = MINI_HEMS.map((hem) => [...MINI, hem].map(toRuns));
+  const MINI_W = 8;
+  const PLANE_MS = 900;
+
   // ---------- DOM ----------
   const canvas = document.getElementById('office');
   const ctx = canvas.getContext('2d');
@@ -79,7 +86,8 @@
   let clockOffset = 0;
   let selectedId = null;
   let lastT = performance.now();
-  const actors = new Map(); // id -> { slot, x, y, spot, firstSeen }
+  const actors = new Map(); // id -> { slot, x, y, spot, firstSeen } | { kid, parentId, x, y, firstSeen }
+  let planes = []; // aviõezinhos de papel: { from, to, start }
 
   // ---------- utilidades ----------
   const hash = (str) => {
@@ -90,7 +98,8 @@
   // cor do fantasma pela mesa (cores diferentes entre vizinhos); caneca e fase pelo id
   const look = (id) => {
     const h = hash(id);
-    const slot = actors.get(id)?.slot ?? h;
+    const a = actors.get(id);
+    const slot = (a?.kid ? actors.get(a.parentId)?.slot : a?.slot) ?? h;
     return { body: BODIES[slot % BODIES.length], mug: MUGS[(h >>> 8) % MUGS.length], phase: (h % 1000) / 160 };
   };
   const darken = (hex, f = 0.6) => {
@@ -119,6 +128,16 @@
   };
   const DOOR = { x: CAFE_X + CAFE_W - 22, y: WALL_H - 10 };
 
+  const byId = (id) => sessions.find((s) => s.id === id);
+  const isKid = (s) => !!s.parentId && !!byId(s.parentId);
+  const topLevel = () => sessions.filter((s) => !isKid(s));
+  const kidsOf = (id) => sessions.filter((s) => s.parentId === id);
+  /** Lugar do filhote: no chão, na frente da mesa do pai. */
+  const kidSpot = (parentSlot, i) => {
+    const { sx, sy } = slotOrigin(parentSlot);
+    return { x: sx + 6 + (i % 6) * 12, y: sy + 55 + Math.floor(i / 6) * 3 };
+  };
+
   /** Mesas do café e os lugares (um de cada lado). */
   function cafeLayout() {
     const tables = [];
@@ -133,7 +152,7 @@
 
   // ---------- tamanho e escala ----------
   function resize() {
-    const maxSlot = Math.max(-1, ...[...actors.values()].map((a) => a.slot));
+    const maxSlot = Math.max(-1, ...[...actors.values()].filter((a) => !a.kid).map((a) => a.slot));
     rows = Math.max(2, Math.ceil((maxSlot + 1) / COLS));
     H = WALL_H + rows * SLOT_H + MARGIN;
     S = Math.max(1, Math.min(3, Math.floor((window.innerWidth - 380) / W)));
@@ -149,13 +168,23 @@
   function syncActors() {
     const ids = new Set(sessions.map((s) => s.id));
     for (const id of actors.keys()) if (!ids.has(id)) actors.delete(id);
-    const used = new Set([...actors.values()].map((a) => a.slot));
-    for (const s of sessions) {
+    const used = new Set([...actors.values()].filter((a) => !a.kid).map((a) => a.slot));
+    for (const s of topLevel()) {
       if (actors.has(s.id)) continue;
       let slot = 0;
       while (used.has(slot)) slot++;
       used.add(slot);
       actors.set(s.id, { slot, x: DOOR.x, y: DOOR.y, spot: -1, firstSeen: performance.now() });
+    }
+    // filhotes nascem do pai, com um aviãozinho de papel levando a tarefa
+    for (const s of sessions.filter(isKid)) {
+      if (actors.has(s.id)) continue;
+      const p = actors.get(s.parentId);
+      if (!p) continue;
+      const i = kidsOf(s.parentId).indexOf(s);
+      const from = { x: p.x + 4, y: p.y + 4 };
+      actors.set(s.id, { kid: true, parentId: s.parentId, x: from.x, y: from.y, firstSeen: performance.now() });
+      planes.push({ from: { x: p.x + 7, y: p.y + 2 }, to: kidSpot(p.slot, i), start: performance.now() });
     }
     if (selectedId && !ids.has(selectedId)) selectedId = null;
     resize();
@@ -167,7 +196,7 @@
     const taken = new Set([...actors.values()].map((a) => a.spot).filter((i) => i >= 0));
     for (const s of sessions) {
       const a = actors.get(s.id);
-      if (!a) continue;
+      if (!a || a.kid) continue;
       let target;
       if (s.state === 'leaving') {
         target = DOOR;
@@ -200,6 +229,33 @@
       a.seated = a.spot < 0 && s.state !== 'leaving' && a.x === seat.x && a.y === seat.y;
       a.inCafe = a.spot >= 0 && a.x === target.x && a.y === target.y;
       a.side = target.side;
+    }
+
+    // filhotes: ficam na frente da mesa do pai; ao terminar, voam até ele para entregar o resultado
+    for (const p of topLevel()) {
+      const pa = actors.get(p.id);
+      if (!pa) continue;
+      kidsOf(p.id).forEach((k, i) => {
+        const a = actors.get(k.id);
+        if (!a) return;
+        const target = k.state === 'leaving' ? { x: pa.x + 3, y: pa.y + 6 } : kidSpot(pa.slot, i);
+        moveTowards(a, target, SPEED * 1.3 * dt);
+        a.arrived = a.x === target.x && a.y === target.y;
+      });
+    }
+    planes = planes.filter((pl) => performance.now() - pl.start < PLANE_MS);
+  }
+
+  function moveTowards(a, target, step) {
+    const dx = target.x - a.x;
+    const dy = target.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= step) {
+      a.x = target.x;
+      a.y = target.y;
+    } else {
+      a.x += (dx / dist) * step;
+      a.y += (dy / dist) * step;
     }
   }
 
@@ -397,32 +453,117 @@
     }
   }
 
-  function drawBubble(x, y, s, t) {
-    const state = visualState(s);
-    let kind = null;
-    if (state === 'thinking') kind = 'dots';
-    else if (state === 'waiting') kind = 'alert';
-    else if (state === 'done' && serverNow() - s.stateAt < DONE_MS) kind = 'check';
-    if (!kind) return;
-    const bx = x + 12;
-    const by = y - 14 - (kind === 'alert' ? Math.floor(t / 200) % 2 : 0);
-    const border = kind === 'alert' ? '#ff5d6c' : '#2c2540';
-    px(bx, by, 18, 10, border);
-    px(bx + 1, by + 1, 16, 8, '#fdfbff');
-    px(bx + 2, by + 10, 3, 2, border);
-    px(bx + 3, by + 9, 2, 2, '#fdfbff');
-    if (kind === 'dots') {
-      const n = Math.floor(t / 300) % 4;
-      for (let i = 0; i < 3; i++) px(bx + 4 + i * 4, by + 4, 2, 2, i < n ? '#5a4a80' : '#d6d0e6');
-    } else if (kind === 'alert') {
-      px(bx + 8, by + 2, 2, 4, '#ff5d6c');
-      px(bx + 8, by + 7, 2, 1, '#ff5d6c');
-    } else {
-      px(bx + 5, by + 5, 2, 2, '#2fa86a');
-      px(bx + 7, by + 6, 2, 2, '#2fa86a');
-      px(bx + 9, by + 4, 2, 2, '#2fa86a');
-      px(bx + 11, by + 2, 2, 2, '#2fa86a');
+  const base = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
+
+  /** Texto curto da ação atual, mostrado no balão. */
+  function actionText(s, t) {
+    const d = s.detail || '';
+    const tool = s.tool || '';
+    switch (visualState(s)) {
+      case 'thinking':
+        return 'pensando' + '.'.repeat(1 + (Math.floor(t / 400) % 3));
+      case 'read':
+        return /(grep|search|glob|find)/i.test(tool) ? `buscando ${d || tool}` : `lendo ${base(d) || tool}`;
+      case 'write':
+        return `editando ${base(d) || tool}`;
+      case 'shell':
+        return `$ ${d || tool}`;
+      case 'web':
+        try {
+          return `web ${new URL(d).host}`;
+        } catch {
+          return `web ${d || tool}`;
+        }
+      case 'mcp':
+        return `mcp ${tool.replace(/^mcp_/, '').replace('_', ':')}`;
+      case 'delegate': {
+        const n = kidsOf(s.id).filter((k) => k.state !== 'leaving').length;
+        return n ? `delegando → ${n} sub` : 'delegando…';
+      }
+      case 'work':
+        return tool || 'trabalhando';
+      case 'waiting':
+        return `permitir? ${d || tool}`;
+      case 'done':
+        return serverNow() - s.stateAt < DONE_MS ? 'pronto! ✓' : null;
+      default:
+        return null;
     }
+  }
+
+  /** Balão de fala com a ação. (cx, top) = centro do fantasma e topo da cabeça. */
+  function drawBubble(cx, top, s, t, minX = 1, maxX = W - 1) {
+    const text = actionText(s, t);
+    if (!text) return;
+    const state = visualState(s);
+    const alert = state === 'waiting';
+    ctx.font = '5px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let label = text;
+    const maxText = Math.min(68, maxX - minX - 10);
+    while (label.length > 4 && ctx.measureText(label).width > maxText) label = label.slice(0, -2) + '…';
+    const w = Math.ceil(ctx.measureText(label).width) + 9;
+    const h = 9;
+    const bx = Math.round(Math.max(minX, Math.min(maxX - w, cx - w / 2)));
+    const by = Math.round(top - h - 4 - (alert ? Math.floor(t / 200) % 2 : 0));
+    const border = alert ? '#ff5d6c' : '#2c2540';
+    px(bx, by, w, h, border);
+    px(bx + 1, by + 1, w - 2, h - 2, alert ? '#fff0f2' : '#fdfbff');
+    const tail = Math.max(bx + 2, Math.min(bx + w - 5, Math.round(cx) - 1));
+    px(tail, by + h, 3, 2, border);
+    px(tail + 1, by + h - 1, 1, 2, alert ? '#fff0f2' : '#fdfbff');
+    px(bx + 2, by + 3, 3, 3, STATE_COLORS[state] || '#888');
+    ctx.fillStyle = alert ? '#b3202f' : '#2b2140';
+    ctx.fillText(label, bx + 6, by + h / 2 + 0.5);
+  }
+
+  /** Filhote (subagente), na cor do pai. */
+  function drawMiniGhost(x, y, lk, t, s) {
+    const frame = MINI_FRAMES[Math.floor(t / 250 + lk.phase) % 2];
+    const outline = darken(lk.body, 0.55);
+    frame.forEach((runs, r) => runs.forEach(([c, len]) => px(x + c - 1, y + r - 1, len + 2, 3, outline)));
+    frame.forEach((runs, r) => runs.forEach(([c, len]) => px(x + c, y + r, len, 1, lk.body)));
+    const state = visualState(s);
+    if (state === 'done' || state === 'leaving') {
+      px(x + 1, y + 3, 2, 1, EYE);
+      px(x + 5, y + 3, 2, 1, EYE);
+    } else {
+      px(x + 2, y + 2, 1, 2, EYE);
+      px(x + 5, y + 2, 1, 2, EYE);
+    }
+    // indicador de estado acima da cabeça
+    const busy = !['idle', 'done', 'leaving'].includes(state);
+    if (state === 'waiting') {
+      px(x + 3, y - 7 - (Math.floor(t / 200) % 2), 2, 3, '#ff5d6c');
+      px(x + 3, y - 3 - (Math.floor(t / 200) % 2), 2, 1, '#ff5d6c');
+    } else if (busy) {
+      px(x + 3, y - 4, 2, 2, STATE_COLORS[state] || '#888');
+    }
+    // carregando o resultado de volta para o pai
+    if (state === 'leaving') {
+      px(x + 6, y + 2, 5, 6, '#f4f1e8');
+      px(x + 7, y + 3, 3, 1, '#a9a395');
+      px(x + 7, y + 5, 3, 1, '#a9a395');
+    }
+  }
+
+  function drawPlane(pl, now) {
+    const k = Math.min(1, (now - pl.start) / PLANE_MS);
+    const x = pl.from.x + (pl.to.x - pl.from.x) * k;
+    const y = pl.from.y + (pl.to.y - pl.from.y) * k - Math.sin(k * Math.PI) * 14;
+    px(x, y, 5, 1, '#ffffff');
+    px(x + 1, y + 1, 3, 1, '#e6e0f0');
+    px(x + 2, y + 2, 1, 1, '#c9c2d8');
+  }
+
+  function drawTether(a, kid) {
+    const x0 = a.x + GHOST_W / 2;
+    const y0 = a.y + 12;
+    const x1 = kid.x + MINI_W / 2;
+    const y1 = kid.y;
+    const n = Math.floor(Math.hypot(x1 - x0, y1 - y0) / 3);
+    for (let i = 1; i < n; i++) px(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n, 1, 1, 'rgba(155,107,255,0.55)');
   }
 
   function drawLabel(cx, y, text, color, selected, size = 6) {
@@ -487,7 +628,7 @@
     drawRoom(t);
 
     const bySlot = new Map();
-    for (const s of sessions) {
+    for (const s of topLevel()) {
       const a = actors.get(s.id);
       if (a) bySlot.set(a.slot, { s, a });
     }
@@ -506,15 +647,36 @@
       let gy = a.y;
       if (a.seated) gy = drawSeatedBody(a, s, lk, t);
       drawDesk(sx, sy, s, lk, t, !a.seated);
-      if (a.seated) {
-        drawSeatedFront(a, s, lk, t, sy);
-        drawBubble(a.x, gy, s, t);
-      }
-      drawLabel(sx + SLOT_W / 2, sy + 62, s.name, STATE_COLORS[panelState(s)] || '#888', s.id === selectedId);
+      if (a.seated) drawSeatedFront(a, s, lk, t, sy);
+      drawLabel(sx + SLOT_W / 2, sy + 70, s.name, STATE_COLORS[panelState(s)] || '#888', s.id === selectedId);
+    }
+
+    // subagentes: linha até o pai, filhotes na frente da mesa e aviõezinhos
+    const now = performance.now();
+    for (const s of sessions.filter(isKid)) {
+      const a = actors.get(s.id);
+      const pa = actors.get(s.parentId);
+      if (!a || !pa) continue;
+      const lk = look(s.id);
+      if (s.state !== 'leaving' && pa.seated && a.arrived) drawTether(pa, a);
+      const fadeIn = Math.min(1, (now - a.firstSeen) / 500);
+      const fadeOut = s.state === 'leaving' && a.arrived ? Math.max(0, 1 - (serverNow() - s.stateAt) / 1200) : 1;
+      ctx.globalAlpha = fadeIn * fadeOut;
+      drawMiniGhost(a.x, a.y + Math.round(Math.sin(t / 300 + lk.phase)), lk, t, s);
+      ctx.globalAlpha = 1;
+    }
+    for (const pl of planes) drawPlane(pl, now);
+
+    // balões dos que estão sentados (depois dos filhotes, para ficarem por cima)
+    for (const [slot, { s, a }] of bySlot) {
+      if (!a.seated) continue;
+      const { sx } = slotOrigin(slot);
+      const bob = ['thinking', 'idle'].includes(visualState(s)) ? Math.round(Math.sin(t / 450 + look(s.id).phase)) : 0;
+      drawBubble(a.x + GHOST_W / 2, a.y + bob, s, t, sx + 1, sx + SLOT_W - 1);
     }
 
     // fantasmas voando ou no café (por cima de tudo, ordenados por y)
-    const floating = sessions
+    const floating = topLevel()
       .map((s) => ({ s, a: actors.get(s.id) }))
       .filter(({ a }) => a && !a.seated)
       .sort((p, q) => p.a.y - q.a.y);
@@ -529,8 +691,8 @@
       if (a.inCafe) {
         const mx = a.side === 'right' ? a.x - 5 : a.x + GHOST_W + 1;
         drawMug(mx, gy + 7, lk.mug, t);
-      } else {
-        drawBubble(a.x, gy, s, t);
+      } else if (s.state !== 'leaving') {
+        drawBubble(a.x + GHOST_W / 2, gy, s, t);
       }
       ctx.globalAlpha = 1;
       if (a.inCafe) drawLabel(a.x + GHOST_W / 2, gy - 6, s.name, STATE_COLORS.cafe, s.id === selectedId, 5);
@@ -545,28 +707,44 @@
 
   // ---------- painel lateral ----------
   function renderPanel() {
-    const active = sessions.filter((s) => s.state !== 'leaving');
+    const tops = topLevel();
+    const active = tops.filter((s) => s.state !== 'leaving');
     const states = active.map(panelState);
     const busy = states.filter((st) => !['idle', 'done', 'cafe'].includes(st)).length;
     const cafe = states.filter((st) => st === 'cafe').length;
-    const waiting = states.filter((st) => st === 'waiting').length;
+    const waiting = sessions.filter((s) => s.state === 'waiting').length;
+    const subs = sessions.filter((s) => isKid(s) && s.state !== 'leaving').length;
     summary.textContent =
       `${active.length} agente(s) · ${busy} ocupado(s)` +
+      (subs ? ` · ${subs} subagente(s)` : '') +
       (cafe ? ` · ${cafe} no café` : '') +
       (waiting ? ` · ${waiting} aguardando você` : '');
     empty.classList.toggle('hidden', sessions.length > 0);
 
-    panel.innerHTML = sessions
+    const detailOf = (s) => (s.tool || s.detail ? `${esc(s.tool)}${s.tool && s.detail ? ' · ' : ''}${esc(s.detail)}` : '');
+    panel.innerHTML = tops
       .map((s) => {
         const state = panelState(s);
         const lk = look(s.id);
-        const cls = ['card', s.id === selectedId ? 'selected' : '', state === 'waiting' ? 'waiting' : ''].join(' ');
-        const detail = s.tool || s.detail ? `<div class="detail">${esc(s.tool)}${s.tool && s.detail ? ' · ' : ''}${esc(s.detail)}</div>` : '';
+        const kids = kidsOf(s.id);
+        const kidWaiting = kids.some((k) => k.state === 'waiting');
+        const cls = ['card', s.id === selectedId ? 'selected' : '', state === 'waiting' || kidWaiting ? 'waiting' : ''].join(' ');
+        const detail = detailOf(s) ? `<div class="detail">${detailOf(s)}</div>` : '';
+        const kidsHtml = kids.length
+          ? `<div class="kids">${kids
+              .map((k) => {
+                const ks = visualState(k);
+                const label = k.state === 'leaving' ? 'Entregando resultado' : LABELS[ks] || ks;
+                return `<div class="kid${ks === 'waiting' ? ' waiting' : ''}" data-id="${esc(k.id)}"><span class="dot" style="background:${lk.body}"></span>
+                  <b>${esc(k.name)}</b> <span class="kstate">${esc(label)}</span>${detailOf(k) ? `<div class="kdetail">${detailOf(k)}</div>` : ''}</div>`;
+              })
+              .join('')}</div>`
+          : '';
         const log = s.log.slice(0, 5).map((l) => `<li><time>${hhmmss(l.t)}</time>${esc(l.text)}</li>`).join('');
         return `<div class="${cls}" data-id="${esc(s.id)}">
           <div class="top"><span class="dot" style="background:${lk.body}"></span>
           <span class="name">${esc(s.name)}</span><span class="state">${LABELS[state] || state}</span></div>
-          <div class="cwd">${esc(s.cwd)}</div>${detail}<ul>${log}</ul></div>`;
+          <div class="cwd">${esc(s.cwd)}</div>${detail}${kidsHtml}<ul>${log}</ul></div>`;
       })
       .join('');
   }

@@ -46,10 +46,12 @@ export function summarizeInput(input, max = 90) {
   if (typeof input === 'string') {
     text = input;
   } else if (typeof input === 'object') {
-    const keys = ['command', 'path', 'file_path', 'filePath', 'pattern', 'query', 'url', 'paths', 'operations'];
-    const key = keys.find((k) => input[k] != null);
-    const value = key ? input[key] : input;
-    text = typeof value === 'string' ? value : JSON.stringify(value);
+    // Ferramentas como "read" do Kiro mandam { operations: [{ mode, path }] }
+    const obj = Array.isArray(input.operations) && input.operations[0] && typeof input.operations[0] === 'object' ? input.operations[0] : input;
+    const keys = ['command', 'path', 'file_path', 'filePath', 'pattern', 'query', 'url', 'prompt', 'task', 'paths'];
+    const key = keys.find((k) => obj[k] != null);
+    const value = key ? obj[key] : obj;
+    text = typeof value === 'string' ? value : Array.isArray(value) ? value.join(', ') : JSON.stringify(value);
   } else {
     text = String(input);
   }

@@ -1,14 +1,47 @@
-// Estado em memória das sessões (um personagem por session_id).
+// Estado em memória das sessões (um fantasma por session_id), com vínculo pai → subagentes.
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { normalizeEvent, toolCategory, summarizeInput } from './events.js';
 
 const MAX_LOG = 8;
 export const STALE_MS = 15 * 60 * 1000; // sessão sem eventos por 15 min some do escritório
-export const LEAVE_MS = 3000; // tempo da animação de saída
+export const LEAVE_MS = 3000; // animação de saída pela porta
+export const RETURN_MS = 5000; // subagente voando até o pai para entregar o resultado
+export const DELEGATION_WINDOW_MS = 10 * 60 * 1000; // até quando uma sessão nova pode ser filha de uma delegação
+const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.kiro', 'sessions', 'cli');
+
+/**
+ * Tenta achar o pai de uma sessão no arquivo persistido pelo Kiro CLI
+ * (~/.kiro/sessions/cli/<id>.json). O nome exato do campo não é documentado,
+ * então aceita qualquer chave "parent…id" com valor string.
+ */
+export function readParentFromSessionFile(sessionsDir, id) {
+  if (!sessionsDir || !/^[\w.-]+$/.test(id)) return null;
+  try {
+    const raw = fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf8');
+    return findParentKey(JSON.parse(raw), 0);
+  } catch {
+    return null;
+  }
+}
+
+function findParentKey(obj, depth) {
+  if (!obj || typeof obj !== 'object' || depth > 3) return null;
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string' && v && /^parent.*(session|conversation)?.*id$/i.test(k.replace(/[_-]/g, ''))) return v;
+  }
+  for (const v of Object.values(obj)) {
+    const found = findParentKey(v, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
 
 export class SessionStore {
-  constructor({ now = () => Date.now() } = {}) {
+  constructor({ now = () => Date.now(), sessionsDir = DEFAULT_SESSIONS_DIR } = {}) {
     this.now = now;
+    this.sessionsDir = sessionsDir;
     this.sessions = new Map();
   }
 
@@ -25,19 +58,7 @@ export class SessionStore {
     let s = this.sessions.get(id);
     if (!s) {
       if (kind === 'end') return false;
-      s = {
-        id,
-        cwd,
-        name: this.#uniqueName(path.basename(cwd) || 'kiro'),
-        state: 'idle',
-        tool: '',
-        detail: '',
-        log: [],
-        createdAt: t,
-        updatedAt: t,
-        stateAt: t,
-      };
-      this.sessions.set(id, s);
+      s = this.#create(id, cwd, payload, t);
     }
     if (cwd && !s.cwd) s.cwd = cwd;
 
@@ -53,41 +74,46 @@ export class SessionStore {
     switch (kind) {
       case 'start':
         setState('idle');
-        log('Sessão iniciada');
+        log(s.parentId ? 'Subagente iniciado' : 'Sessão iniciada');
         break;
-      case 'prompt': {
+      case 'prompt':
         setState('thinking');
         s.tool = '';
         s.detail = summarizeInput(payload.prompt ?? payload.user_prompt ?? '', 120);
         log(s.detail ? `Prompt: ${s.detail}` : 'Novo prompt');
         break;
-      }
       case 'pre_tool': {
         const tool = String(payload.tool_name ?? payload.toolName ?? '');
-        setState(toolCategory(tool));
+        const category = toolCategory(tool);
+        setState(category);
         s.tool = tool;
         s.detail = summarizeInput(payload.tool_input ?? payload.toolInput);
+        if (category === 'delegate') s.delegatingSince = t;
         log(`${tool || 'ferramenta'}${s.detail ? ` · ${s.detail}` : ''}`);
         break;
       }
       case 'post_tool':
+        if (s.delegatingSince != null && toolCategory(payload.tool_name ?? s.tool) === 'delegate') {
+          this.#finishDelegation(s, t);
+          log('Resultados dos subagentes recebidos');
+        }
         setState('thinking');
         break;
-      case 'permission': {
+      case 'permission':
         setState('waiting');
-        const tool = String(payload.tool_name ?? s.tool ?? '');
-        s.tool = tool;
+        s.tool = String(payload.tool_name ?? s.tool ?? '');
         s.detail = summarizeInput(payload.tool_input ?? payload.permission?.command ?? s.detail);
-        log(`Aguardando permissão: ${tool}`);
+        log(`Aguardando permissão: ${s.tool}`);
         break;
-      }
       case 'stop':
+        if (s.delegatingSince != null) this.#finishDelegation(s, t);
         setState('done');
         s.tool = '';
         s.detail = '';
         log('Turno concluído');
         break;
       case 'end':
+        this.#finishDelegation(s, t);
         setState('leaving');
         log('Sessão encerrada');
         break;
@@ -96,12 +122,15 @@ export class SessionStore {
     return true;
   }
 
-  /** Remove sessões encerradas ou abandonadas. Retorna true se algo mudou. */
+  /** Remove sessões encerradas, abandonadas ou subagentes órfãos. Retorna true se algo mudou. */
   sweep() {
     const t = this.now();
     let changed = false;
     for (const [id, s] of this.sessions) {
-      const gone = s.state === 'leaving' ? t - s.stateAt > LEAVE_MS : t - s.updatedAt > STALE_MS;
+      let gone;
+      if (s.state === 'leaving') gone = t - s.stateAt > (s.returning ? RETURN_MS : LEAVE_MS);
+      else if (s.parentId && !this.sessions.has(s.parentId)) gone = true;
+      else gone = t - s.updatedAt > STALE_MS;
       if (gone) {
         this.sessions.delete(id);
         changed = true;
@@ -117,8 +146,66 @@ export class SessionStore {
     };
   }
 
+  #create(id, cwd, payload, t) {
+    const parent = this.#findParent(id, cwd, payload, t);
+    const s = {
+      id,
+      cwd,
+      name: '',
+      parentId: parent?.id ?? null,
+      state: 'idle',
+      tool: '',
+      detail: '',
+      log: [],
+      createdAt: t,
+      updatedAt: t,
+      stateAt: t,
+      delegatingSince: null,
+      kidCounter: 0,
+      returning: false,
+    };
+    if (parent) {
+      parent.kidCounter += 1;
+      s.name = `sub ${parent.kidCounter}`;
+      parent.log.unshift({ t, text: `Subagente ${s.name} criado` });
+    } else {
+      s.name = this.#uniqueName(path.basename(cwd) || 'kiro');
+    }
+    this.sessions.set(id, s);
+    return s;
+  }
+
+  /** Pai explícito no payload → arquivo de sessão do Kiro → correlação com uma delegação aberta. */
+  #findParent(id, cwd, payload, t) {
+    const explicit = payload.parent_session_id ?? payload.parentSessionId ?? payload.parent_id;
+    const fromFile = explicit ? null : readParentFromSessionFile(this.sessionsDir, id);
+    const known = this.sessions.get(String(explicit || fromFile || ''));
+    if (known && known.id !== id) return known;
+
+    const open = [...this.sessions.values()].filter(
+      (p) => !p.parentId && p.delegatingSince != null && t - p.delegatingSince < DELEGATION_WINDOW_MS && p.state !== 'leaving',
+    );
+    if (open.length === 0) return null;
+    const sameCwd = open.filter((p) => p.cwd && p.cwd === cwd);
+    const pool = sameCwd.length ? sameCwd : open.length === 1 ? open : [];
+    return pool.sort((a, b) => b.delegatingSince - a.delegatingSince)[0] ?? null;
+  }
+
+  /** O pai recebeu os resultados: os filhos voam até ele, entregam e somem. */
+  #finishDelegation(parent, t) {
+    parent.delegatingSince = null;
+    for (const kid of this.sessions.values()) {
+      if (kid.parentId !== parent.id || kid.state === 'leaving') continue;
+      kid.state = 'leaving';
+      kid.stateAt = t;
+      kid.returning = true;
+      kid.updatedAt = t;
+      kid.log.unshift({ t, text: 'Resultado entregue ao agente principal' });
+    }
+  }
+
   #uniqueName(base) {
-    const names = new Set([...this.sessions.values()].map((s) => s.name));
+    const names = new Set([...this.sessions.values()].filter((s) => !s.parentId).map((s) => s.name));
     if (!names.has(base)) return base;
     let i = 2;
     while (names.has(`${base} #${i}`)) i++;

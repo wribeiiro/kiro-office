@@ -15,6 +15,7 @@ const TOOLS = [
   ['web_fetch', { url: 'https://kiro.dev/docs/hooks/' }],
   ['mcp_jira_get_issue', { query: 'GEN-1234' }],
   ['use_subagent', { query: 'revisar a PR' }],
+  ['use_subagent', { query: 'investigar testes falhando' }],
 ];
 const PROMPTS = ['implemente o endpoint de exportação', 'por que esse teste está falhando?', 'refatore o módulo de auth', 'escreva a steering de testes'];
 
@@ -25,6 +26,27 @@ const post = (body) =>
     console.error(`Não consegui falar com ${url}. O servidor está rodando? (npm start)`);
     process.exit(1);
   });
+
+/** Subagentes em paralelo: sessões novas no mesmo cwd, logo depois do use_subagent do pai. */
+async function runSubagents(cwd, n) {
+  const SUB_TOOLS = TOOLS.filter(([t]) => t !== 'use_subagent');
+  await Promise.all(
+    Array.from({ length: n }, async (_, k) => {
+      const session_id = `sub-${k}-${Math.random().toString(36).slice(2, 8)}`;
+      const ev = (hook_event_name, extra = {}) => post({ hook_event_name, session_id, cwd, ...extra });
+      await sleep(300 + k * 400);
+      await ev('SessionStart');
+      for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
+        const [tool_name, tool_input] = pick(SUB_TOOLS);
+        await ev('PreToolUse', { tool_name, tool_input });
+        await sleep(1800 + Math.random() * 2200);
+        await ev('PostToolUse', { tool_name, tool_input });
+      }
+      await ev('Stop');
+    }),
+  );
+  await sleep(800);
+}
 
 async function runSession(i) {
   const session_id = `demo-${i}-${Date.now().toString(36)}`;
@@ -46,7 +68,8 @@ async function runSession(i) {
         await ev('PermissionRequest', { tool_name, tool_input });
         await sleep(4000);
       }
-      await sleep(1500 + Math.random() * 2000);
+      if (tool_name === 'use_subagent') await runSubagents(cwd, 2 + Math.floor(Math.random() * 2));
+      else await sleep(1500 + Math.random() * 2000);
       await ev('PostToolUse', { tool_name, tool_input });
       await sleep(600);
     }

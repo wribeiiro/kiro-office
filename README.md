@@ -27,6 +27,21 @@ kiro-cli ──(hooks)──▶ hooks/send.js ──POST──▶ servidor local
 | `Stop` | comemora ✓; depois de alguns segundos ocioso, vai para o café ☕ |
 | `SessionEnd` | sai pela porta e some |
 
+Os **balões de fala** mostram a ação atual: `lendo App.java`, `editando Button.tsx`, `$ npm test`, `web kiro.dev`, `mcp jira:get_issue`, `delegando → 3 sub`, `permitir? git status` (em vermelho) e `pronto! ✓`.
+
+### Subagentes
+
+Quando um agente delega, cada subagente vira um **filhote** da mesma cor do pai. O filhote nasce da mesa do pai, com um aviãozinho de papel levando a tarefa, e fica na frente da mesa ligado ao pai por uma linha pontilhada. No painel lateral, os filhotes aparecem aninhados no card do pai, cada um com a sua ação. Quando o pai recebe os resultados (`PostToolUse` da ferramenta de subagente), os filhotes voam até ele carregando um papel, entregam e somem.
+
+Para saber quem é pai de quem, o servidor tenta, nesta ordem:
+1. um campo de pai no payload do hook (`parent_session_id`, `parentSessionId` ou `parent_id`), se o Kiro enviar;
+2. o arquivo da sessão em `~/.kiro/sessions/cli/<session_id>.json`, procurando um campo `parent…id`;
+3. **correlação por tempo:** uma sessão nova que aparece enquanto outra, no mesmo diretório, está com uma delegação aberta é considerada filha dela.
+
+Limitação: os filhotes só aparecem se os hooks globais dispararem dentro dos subagentes com um `session_id` próprio. Se não dispararem, o pai mostra só `delegando…`. Uma sessão nova aberta no mesmo projeto enquanto outra está delegando pode ser confundida com um filho.
+
+Os agentes não conversam entre si: no Kiro, o pai manda a tarefa e cada subagente devolve o resultado ao pai.
+
 ## Requisitos
 
 - Node.js 20+
