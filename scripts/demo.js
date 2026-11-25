@@ -17,6 +17,8 @@ const TOOLS = [
   ['use_subagent', { query: 'revisar a PR' }],
   ['use_subagent', { query: 'investigar testes falhando' }],
 ];
+const AGENTS = ['dev-agent', 'reviewer', 'spec-writer', 'kiro_default'];
+const SUB_AGENTS = ['explorer', 'tester', 'doc-reader'];
 const PROMPTS = ['implemente o endpoint de exportação', 'por que esse teste está falhando?', 'refatore o módulo de auth', 'escreva a steering de testes'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -33,7 +35,8 @@ async function runSubagents(cwd, n) {
   await Promise.all(
     Array.from({ length: n }, async (_, k) => {
       const session_id = `sub-${k}-${Math.random().toString(36).slice(2, 8)}`;
-      const ev = (hook_event_name, extra = {}) => post({ hook_event_name, session_id, cwd, ...extra });
+      const agent_name = SUB_AGENTS[k % SUB_AGENTS.length];
+      const ev = (hook_event_name, extra = {}) => post({ hook_event_name, session_id, cwd, agent_name, ...extra });
       await sleep(300 + k * 400);
       await ev('SessionStart');
       for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
@@ -51,7 +54,8 @@ async function runSubagents(cwd, n) {
 async function runSession(i) {
   const session_id = `demo-${i}-${Date.now().toString(36)}`;
   const cwd = PROJECTS[i % PROJECTS.length];
-  const ev = (hook_event_name, extra = {}) => post({ hook_event_name, session_id, cwd, ...extra });
+  const agent_name = AGENTS[i % AGENTS.length];
+  const ev = (hook_event_name, extra = {}) => post({ hook_event_name, session_id, cwd, agent_name, ...extra });
 
   await sleep(i * 1200);
   await ev('SessionStart');

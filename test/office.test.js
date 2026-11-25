@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeEvent, toolCategory, summarizeInput } from '../src/events.js';
-import { SessionStore, STALE_MS, LEAVE_MS, RETURN_MS, readParentFromSessionFile } from '../src/store.js';
+import { SessionStore, STALE_MS, LEAVE_MS, RETURN_MS, AGENT_RETRY_MS, readParentFromSessionFile, findAgentName } from '../src/store.js';
 import { createOfficeServer } from '../src/server.js';
 import { installHooks, uninstallHooks, listHooks, TRIGGERS } from '../src/hooks-installer.js';
 
@@ -202,4 +202,31 @@ test('Ctrl+C encerra o servidor mesmo com o navegador conectado (SSE aberto)', a
   assert.equal(code, 0);
   assert.ok(Date.now() - started < 1500, `demorou ${Date.now() - started}ms`);
   await reader.cancel().catch(() => {});
+});
+
+test('findAgentName aceita os formatos mais prováveis do Kiro', () => {
+  assert.equal(findAgentName({ agent_name: 'dev-agent' }), 'dev-agent');
+  assert.equal(findAgentName({ agentName: 'reviewer' }), 'reviewer');
+  assert.equal(findAgentName({ meta: { agent: { name: 'spec-writer', model: 'x' } } }), 'spec-writer');
+  assert.equal(findAgentName({ user_agent: 'curl', profile: 'aws-default' }), null);
+});
+
+test('nome do agente vem do payload ou do arquivo de sessão (com nova tentativa)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-sessions-'));
+  let now = 1000;
+  const store = new SessionStore({ now: () => now, sessionsDir: dir });
+  const byId = (id) => store.snapshot().sessions.find((s) => s.id === id);
+
+  store.apply({ hook_event_name: 'SessionStart', session_id: 'a', cwd: '/p', agent_name: 'dev-agent' });
+  assert.equal(byId('a').agent, 'dev-agent');
+
+  // arquivo ainda não existe no SessionStart; aparece depois
+  store.apply({ hook_event_name: 'SessionStart', session_id: 'b', cwd: '/q' });
+  assert.equal(byId('b').agent, null);
+  fs.writeFileSync(path.join(dir, 'b.json'), JSON.stringify({ cwd: '/q', agent_name: 'reviewer' }));
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'b', tool_name: 'fs_read' });
+  assert.equal(byId('b').agent, null, 'respeita o intervalo entre tentativas');
+  now += AGENT_RETRY_MS + 1;
+  store.apply({ hook_event_name: 'PostToolUse', session_id: 'b', tool_name: 'fs_read' });
+  assert.equal(byId('b').agent, 'reviewer');
 });

@@ -29,6 +29,11 @@ kiro-cli ──(hooks)──▶ hooks/send.js ──POST──▶ servidor local
 
 Os **balões de fala** mostram a ação atual: `lendo App.java`, `editando Button.tsx`, `$ npm test`, `web kiro.dev`, `mcp jira:get_issue`, `delegando → 3 sub`, `permitir? git status` (em vermelho) e `pronto! ✓`.
 
+### Nomes
+
+- O **rótulo abaixo da mesa** é a pasta do projeto: o último trecho do `cwd`, com `#2`, `#3` se houver mais de uma sessão na mesma pasta.
+- A **plaquinha dourada na mesa** é o **agente** do Kiro (o perfil, como `kiro_default` ou um agente customizado). O servidor procura o nome em `agent_name` / `agentName` / `agent` no payload do hook e, se não achar, no arquivo `~/.kiro/sessions/cli/<session_id>.json`. Ele tenta de novo a cada 5 s, caso o arquivo ainda não exista no início da sessão. Se não encontrar, a plaquinha simplesmente não aparece.
+
 ### Subagentes
 
 Quando um agente delega, cada subagente vira um **filhote** da mesma cor do pai. O filhote nasce da mesa do pai, com um aviãozinho de papel levando a tarefa, e fica na frente da mesa ligado ao pai por uma linha pontilhada. No painel lateral, os filhotes aparecem aninhados no card do pai, cada um com a sua ação. Quando o pai recebe os resultados (`PostToolUse` da ferramenta de subagente), os filhotes voam até ele carregando um papel, entregam e somem.

@@ -86,6 +86,7 @@ aside {
 .card .dot { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 .card .name { font-weight: bold; font-size: 13px; }
 .card .state { margin-left: auto; color: var(--muted); }
+.agent { font-size: 11px; color: #3a2410; background: #d9b56a; border-radius: 3px; padding: 0 5px; }
 .card.waiting .state { color: var(--warn); font-weight: bold; }
 .card .cwd { color: var(--muted); margin: 4px 0; word-break: break-all; }
 .card .detail { margin: 4px 0; color: #d6c8ff; word-break: break-word; }

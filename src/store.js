@@ -16,15 +16,41 @@ const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.kiro', 'sessions', 'cli')
  * (~/.kiro/sessions/cli/<id>.json). O nome exato do campo não é documentado,
  * então aceita qualquer chave "parent…id" com valor string.
  */
-export function readParentFromSessionFile(sessionsDir, id) {
+export function readSessionFile(sessionsDir, id) {
   if (!sessionsDir || !/^[\w.-]+$/.test(id)) return null;
   try {
-    const raw = fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf8');
-    return findParentKey(JSON.parse(raw), 0);
+    return JSON.parse(fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf8'));
   } catch {
     return null;
   }
 }
+
+export function readParentFromSessionFile(sessionsDir, id) {
+  return findParentKey(readSessionFile(sessionsDir, id), 0);
+}
+
+/**
+ * Nome do agente (perfil do Kiro) a partir de um objeto qualquer: aceita
+ * agent_name / agentName / agent (texto) / agent.name, até 3 níveis de profundidade.
+ */
+export function findAgentName(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 3) return null;
+  for (const [k, v] of Object.entries(obj)) {
+    const key = k.toLowerCase().replace(/[_-]/g, '');
+    if (!['agent', 'agentname', 'agentprofile'].includes(key)) continue;
+    if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 40);
+    if (v && typeof v === 'object' && typeof v.name === 'string' && v.name.trim()) return v.name.trim().slice(0, 40);
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') {
+      const found = findAgentName(v, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+export const AGENT_RETRY_MS = 5000; // tenta de novo ler o arquivo de sessão a cada 5 s até achar o agente
 
 function findParentKey(obj, depth) {
   if (!obj || typeof obj !== 'object' || depth > 3) return null;
@@ -61,6 +87,7 @@ export class SessionStore {
       s = this.#create(id, cwd, payload, t);
     }
     if (cwd && !s.cwd) s.cwd = cwd;
+    this.#resolveAgent(s, payload, t);
 
     const setState = (state) => {
       if (s.state !== state) s.stateAt = t;
@@ -163,6 +190,8 @@ export class SessionStore {
       delegatingSince: null,
       kidCounter: 0,
       returning: false,
+      agent: null,
+      agentCheckedAt: -Infinity,
     };
     if (parent) {
       parent.kidCounter += 1;
@@ -176,6 +205,22 @@ export class SessionStore {
   }
 
   /** Pai explícito no payload → arquivo de sessão do Kiro → correlação com uma delegação aberta. */
+  /** Nome do agente: primeiro no payload do hook, depois no arquivo de sessão do Kiro (com nova tentativa). */
+  #resolveAgent(s, payload, t) {
+    if (s.agent) return;
+    const fromPayload = findAgentName(
+      { agent_name: payload.agent_name, agentName: payload.agentName, agent: payload.agent },
+      0,
+    );
+    if (fromPayload) {
+      s.agent = fromPayload;
+      return;
+    }
+    if (!this.sessionsDir || t - s.agentCheckedAt < AGENT_RETRY_MS) return;
+    s.agentCheckedAt = t;
+    s.agent = findAgentName(readSessionFile(this.sessionsDir, s.id));
+  }
+
   #findParent(id, cwd, payload, t) {
     const explicit = payload.parent_session_id ?? payload.parentSessionId ?? payload.parent_id;
     const fromFile = explicit ? null : readParentFromSessionFile(this.sessionsDir, id);

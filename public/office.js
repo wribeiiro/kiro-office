@@ -437,6 +437,24 @@
     px(sx + 31, sy + 15, 18, 2, '#4a4266');
   }
 
+  /** Plaquinha dourada na frente da mesa com o nome do agente. */
+  function drawNameplate(cx, cy, text) {
+    ctx.font = 'bold 5px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let label = text;
+    while (label.length > 4 && ctx.measureText(label).width > 52) label = label.slice(0, -2) + '…';
+    const w = Math.ceil(ctx.measureText(label).width) + 8;
+    const x = Math.round(cx - w / 2);
+    px(x - 1, cy - 5, w + 2, 10, '#5c391f');
+    px(x, cy - 4, w, 8, '#d9b56a');
+    px(x, cy - 4, w, 1, '#f0d898');
+    px(x + 1, cy - 2, 1, 1, '#8a6a2a');
+    px(x + w - 2, cy - 2, 1, 1, '#8a6a2a');
+    ctx.fillStyle = '#3a2410';
+    ctx.fillText(label, Math.round(cx), cy + 0.5);
+  }
+
   function drawDesk(sx, sy, s, lk, t, away) {
     const state = s ? (away ? 'cafe' : visualState(s)) : null;
     px(sx + 8, sy + 30, 64, 5, '#b07a4a');
@@ -647,6 +665,7 @@
       let gy = a.y;
       if (a.seated) gy = drawSeatedBody(a, s, lk, t);
       drawDesk(sx, sy, s, lk, t, !a.seated);
+      if (s.agent) drawNameplate(sx + SLOT_W / 2, sy + 45, s.agent);
       if (a.seated) drawSeatedFront(a, s, lk, t, sy);
       drawLabel(sx + SLOT_W / 2, sy + 70, s.name, STATE_COLORS[panelState(s)] || '#888', s.id === selectedId);
     }
@@ -736,14 +755,14 @@
                 const ks = visualState(k);
                 const label = k.state === 'leaving' ? 'Entregando resultado' : LABELS[ks] || ks;
                 return `<div class="kid${ks === 'waiting' ? ' waiting' : ''}" data-id="${esc(k.id)}"><span class="dot" style="background:${lk.body}"></span>
-                  <b>${esc(k.name)}</b> <span class="kstate">${esc(label)}</span>${detailOf(k) ? `<div class="kdetail">${detailOf(k)}</div>` : ''}</div>`;
+                  <b>${esc(k.name)}</b>${k.agent ? ` <span class="agent">${esc(k.agent)}</span>` : ''} <span class="kstate">${esc(label)}</span>${detailOf(k) ? `<div class="kdetail">${detailOf(k)}</div>` : ''}</div>`;
               })
               .join('')}</div>`
           : '';
         const log = s.log.slice(0, 5).map((l) => `<li><time>${hhmmss(l.t)}</time>${esc(l.text)}</li>`).join('');
         return `<div class="${cls}" data-id="${esc(s.id)}">
           <div class="top"><span class="dot" style="background:${lk.body}"></span>
-          <span class="name">${esc(s.name)}</span><span class="state">${LABELS[state] || state}</span></div>
+          <span class="name">${esc(s.name)}</span>${s.agent ? `<span class="agent">${esc(s.agent)}</span>` : ''}<span class="state">${LABELS[state] || state}</span></div>
           <div class="cwd">${esc(s.cwd)}</div>${detail}${kidsHtml}<ul>${log}</ul></div>`;
       })
       .join('');
