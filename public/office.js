@@ -473,7 +473,7 @@
 
   const base = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
 
-  /** "generic-security-reviewer" → "security-reviewer" (o nome completo fica na etiqueta e no painel). */
+  /** "stark-bruce-wayne" → "bruce-wayne" (o nome completo fica na etiqueta e no painel). */
   const shortAgent = (name) => {
     const parts = String(name).split('-');
     return parts.length > 2 ? parts.slice(1).join('-') : String(name);
@@ -503,7 +503,7 @@
       case 'delegate': {
         const open = kidsOf(s.id).filter((k) => k.state !== 'leaving');
         if (open.length === 1) {
-          // nome curto do subagente: sem o prefixo comum do time (ex.: "generic-")
+          // nome curto do subagente: sem o prefixo comum do time (ex.: "stark-")
           const who = shortAgent(open[0].agent || open[0].name);
           const kidText = actionText(open[0], t);
           return kidText ? `${who} ↳ ${kidText}` : `delegando → ${who}`;

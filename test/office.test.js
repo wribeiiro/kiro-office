@@ -259,13 +259,13 @@ test('subagente do Kiro CLI com o mesmo session_id do pai vira filhote virtual',
 
   ev('UserPromptSubmit', { prompt: 'siga o padrão do orphancleaner' });
   ev('PreToolUse', {
-    tool_name: 'subagent_generic-software-engineer',
+    tool_name: 'subagent_stark-bruce-wayne',
     tool_input: { explanation: 'Corrigir os 5 achados de SAST', prompt: 'Tarefa longa…' },
   });
   let kid = all().find((s) => s.parentId === sid);
   assert.ok(kid, 'filhote criado');
   assert.equal(kid.virtual, true);
-  assert.equal(kid.agent, 'generic-software-engineer');
+  assert.equal(kid.agent, 'stark-bruce-wayne');
   assert.equal(kid.detail, 'Corrigir os 5 achados de SAST');
   assert.equal(parent().state, 'delegate');
 
@@ -279,7 +279,7 @@ test('subagente do Kiro CLI com o mesmo session_id do pai vira filhote virtual',
   assert.equal(parent().state, 'delegate');
 
   // resultado volta ao pai
-  ev('PostToolUse', { tool_name: 'subagent_generic-software-engineer' });
+  ev('PostToolUse', { tool_name: 'subagent_stark-bruce-wayne' });
   kid = all().find((s) => s.parentId === sid);
   assert.equal(kid.state, 'leaving');
   assert.equal(kid.returning, true);
@@ -315,14 +315,14 @@ test('vários subagentes virtuais em paralelo ficam "trabalhando" e a permissão
 
 test('agente principal vem das variáveis KIRO_* ou de <id sem sess_>.json / .history', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-sessions-'));
-  fs.writeFileSync(path.join(dir, 'abc.json'), JSON.stringify({ agent_name: 'generic-tech-lead' }));
+  fs.writeFileSync(path.join(dir, 'abc.json'), JSON.stringify({ agent_name: 'stark-sexta-feira' }));
   fs.writeFileSync(path.join(dir, 'sess_hist.history'), '{"type":"x"}\n{"agent":{"name":"reviewer"}}\n');
   const store = new SessionStore({ sessionsDir: dir });
   store.apply({ hook_event_name: 'PreToolUse', session_id: 'sess_abc', cwd: '/a', tool_name: 'fs_read' });
   store.apply({ hook_event_name: 'PreToolUse', session_id: 'sess_hist', cwd: '/b', tool_name: 'fs_read' });
   store.apply({ hook_event_name: 'PreToolUse', session_id: 'sess_env', cwd: '/c', tool_name: 'fs_read', _env: { KIRO_AGENT_NAME: 'dev-agent' } });
   const agentOf = (id) => store.snapshot().sessions.find((s) => s.id === id).agent;
-  assert.equal(agentOf('sess_abc'), 'generic-tech-lead');
+  assert.equal(agentOf('sess_abc'), 'stark-sexta-feira');
   assert.equal(agentOf('sess_hist'), 'reviewer');
   assert.equal(agentOf('sess_env'), 'dev-agent');
 });
@@ -345,13 +345,13 @@ test('usa a description do execute_bash como nota legível', () => {
 
 test('agente em session_state.agent_name (formato real do Kiro CLI) e null aparece como null', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-sessions-'));
-  fs.writeFileSync(path.join(dir, 'u1.json'), JSON.stringify({ session_id: 'u1', session_state: { agent_name: 'generic-tech-lead', goal: null } }));
-  assert.equal(findAgentName(JSON.parse(fs.readFileSync(path.join(dir, 'u1.json'), 'utf8'))), 'generic-tech-lead');
+  fs.writeFileSync(path.join(dir, 'u1.json'), JSON.stringify({ session_id: 'u1', session_state: { agent_name: 'stark-sexta-feira', goal: null } }));
+  assert.equal(findAgentName(JSON.parse(fs.readFileSync(path.join(dir, 'u1.json'), 'utf8'))), 'stark-sexta-feira');
   const store = new SessionStore({ sessionsDir: dir });
   store.apply({ hook_event_name: 'PreToolUse', session_id: 'u1', cwd: '/x', tool_name: 'read_file' });
   const keys = store.debug().sessions[0].sessionFileKeys;
   assert.deepEqual(keys.find((k) => k.key === 'session_state.goal'), { key: 'session_state.goal', type: 'null' });
-  assert.equal(store.snapshot().sessions[0].agent, 'generic-tech-lead');
+  assert.equal(store.snapshot().sessions[0].agent, 'stark-sexta-feira');
 });
 
 test('KIRO_AGENT_ENGINE não é o nome do agente; --agent e o agente padrão das configurações são', () => {
@@ -365,10 +365,10 @@ test('KIRO_AGENT_ENGINE não é o nome do agente; --agent e o agente padrão das
   store.apply({ hook_event_name: 'PreToolUse', session_id: 'a', cwd: '/x', tool_name: 'read_file', _env: { KIRO_AGENT_ENGINE: 'kas' } });
   assert.equal(agentOf('a').agent, null);
 
-  fs.writeFileSync(path.join(root, 'settings', 'cli.json'), JSON.stringify({ 'chat.defaultAgent': 'generic-tech-lead' }));
-  assert.equal(readDefaultAgent(path.join(root, 'settings', 'cli.json')), 'generic-tech-lead');
+  fs.writeFileSync(path.join(root, 'settings', 'cli.json'), JSON.stringify({ 'chat.defaultAgent': 'stark-sexta-feira' }));
+  assert.equal(readDefaultAgent(path.join(root, 'settings', 'cli.json')), 'stark-sexta-feira');
   store.apply({ hook_event_name: 'PreToolUse', session_id: 'b', cwd: '/x', tool_name: 'read_file' });
-  assert.equal(agentOf('b').agent, 'generic-tech-lead');
+  assert.equal(agentOf('b').agent, 'stark-sexta-feira');
   assert.match(agentOf('b').agentSource, /padrão/);
 
   // --agent na linha de comando tem prioridade e corrige o padrão
