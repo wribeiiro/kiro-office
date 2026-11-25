@@ -32,7 +32,13 @@ Os **balões de fala** mostram a ação atual: `lendo App.java`, `editando Butto
 ### Nomes
 
 - O **rótulo abaixo da mesa** é a pasta do projeto: o último trecho do `cwd`, com `#2`, `#3` se houver mais de uma sessão na mesma pasta.
-- A **plaquinha dourada na mesa** é o **agente** do Kiro (o perfil, como `kiro_default` ou um agente customizado). O servidor procura o nome em `agent_name` / `agentName` / `agent` no payload do hook e, se não achar, no arquivo `~/.kiro/sessions/cli/<session_id>.json`. Também aceita variáveis de ambiente `KIRO_*AGENT*` do processo do hook, e procura em `<id>.json`, `<id sem sess_>.json` e `<id>.history`. Tenta de novo a cada 5 s, caso o arquivo ainda não exista no início da sessão. Se não encontrar, a plaquinha simplesmente não aparece.
+- A **plaquinha dourada na mesa** é o **agente** do Kiro (como `generic-tech-lead`). O Kiro CLI não manda esse nome nos hooks, então o servidor procura, nesta ordem:
+  1. `--agent <nome>` na linha de comando do `kiro-cli` (o hook sobe a árvore de processos para achar). É a fonte mais confiável; abra com `kiro-cli chat --agent generic-tech-lead`.
+  2. Um campo de agente no payload, ou uma variável de ambiente `*AGENT_NAME`.
+  3. `session_state.agent_name` no arquivo de sessão (`~/.kiro/sessions/cli/`).
+  4. O agente padrão, em `"chat.defaultAgent"` de `~/.kiro/settings/cli.json`.
+
+  Se você troca de agente com `/agent` no meio da sessão, a plaquinha não acompanha. O `/api/debug` mostra de onde veio o nome (`agentSource`).
 
 ### Subagentes
 

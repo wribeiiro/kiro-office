@@ -79,6 +79,18 @@ export function findAgentName(obj, depth = 0) {
   return null;
 }
 
+/** Agente padrão do Kiro CLI: "chat.defaultAgent" em ~/.kiro/settings/cli.json. */
+export function readDefaultAgent(settingsFile) {
+  if (!settingsFile) return null;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    const v = cfg['chat.defaultAgent'] ?? cfg.chat?.defaultAgent;
+    return typeof v === 'string' && v.trim() ? v.trim().slice(0, 40) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const AGENT_RETRY_MS = 5000; // tenta de novo ler o arquivo de sessão a cada 5 s até achar o agente
 
 function findParentKey(obj, depth) {
@@ -125,9 +137,12 @@ const truncateStrings = (value, depth = 0) => {
 };
 
 export class SessionStore {
-  constructor({ now = () => Date.now(), sessionsDir = DEFAULT_SESSIONS_DIR } = {}) {
+  constructor({ now = () => Date.now(), sessionsDir = DEFAULT_SESSIONS_DIR, settingsFile } = {}) {
     this.now = now;
     this.sessionsDir = sessionsDir;
+    // ~/.kiro/settings/cli.json → "chat.defaultAgent"
+    this.settingsFile =
+      settingsFile !== undefined ? settingsFile : sessionsDir ? path.resolve(sessionsDir, '..', '..', 'settings', 'cli.json') : null;
     this.sessions = new Map();
     this.recent = []; // últimos payloads recebidos (diagnóstico)
   }
@@ -152,6 +167,8 @@ export class SessionStore {
     return {
       sessionsDir: this.sessionsDir,
       sessionsDirExists: dirExists,
+      settingsFile: this.settingsFile,
+      defaultAgentFromSettings: readDefaultAgent(this.settingsFile),
       newestFilesInSessionsDir: newestFiles,
       sessions: [...this.sessions.values()].map((s) => {
         const candidates = sessionFileCandidates(this.sessionsDir, s.id).map((f) => ({ file: f, exists: fs.existsSync(f) }));
@@ -160,6 +177,7 @@ export class SessionStore {
           id: s.id,
           name: s.name,
           agent: s.agent,
+          agentSource: s.agentSource,
           parentId: s.parentId,
           virtual: s.virtual,
           sessionFileCandidates: candidates,
@@ -388,6 +406,7 @@ export class SessionStore {
       kidCounter: 0,
       returning: false,
       agent: null,
+      agentSource: null,
       agentCheckedAt: -Infinity,
     };
   }
@@ -410,19 +429,41 @@ export class SessionStore {
   /** Pai explícito no payload → arquivo de sessão do Kiro → correlação com uma delegação aberta. */
   /** Nome do agente: primeiro no payload do hook, depois no arquivo de sessão do Kiro (com nova tentativa). */
   #resolveAgent(s, payload, t) {
+    if (s.virtual) return;
+    // 1) linha de comando do Kiro (--agent) — vem em todo evento, então pode corrigir as outras fontes
+    if (typeof payload._agent === 'string' && payload._agent.trim()) {
+      s.agent = payload._agent.trim().slice(0, 40);
+      s.agentSource = 'linha de comando (--agent)';
+      return;
+    }
     if (s.agent) return;
+    // 2) campo explícito no payload ou variável de ambiente com AGENT_NAME (não KIRO_AGENT_ENGINE)
     const env = payload._env && typeof payload._env === 'object' ? payload._env : {};
-    const envAgent = Object.entries(env).find(([k, v]) => /AGENT/i.test(k) && typeof v === 'string' && v.trim());
+    const envAgent = Object.entries(env).find(
+      ([k, v]) => /AGENT_?NAME$|^KIRO_AGENT$/i.test(k) && typeof v === 'string' && v.trim(),
+    );
     const fromPayload =
       findAgentName({ agent_name: payload.agent_name, agentName: payload.agentName, agent: payload.agent }, 0) ??
       (envAgent ? envAgent[1].trim().slice(0, 40) : null);
     if (fromPayload) {
       s.agent = fromPayload;
+      s.agentSource = 'payload';
       return;
     }
-    if (!this.sessionsDir || t - s.agentCheckedAt < AGENT_RETRY_MS) return;
+    if (t - s.agentCheckedAt < AGENT_RETRY_MS) return;
     s.agentCheckedAt = t;
-    if (!s.virtual) s.agent = findAgentName(readSessionFile(this.sessionsDir, s.id));
+    // 3) arquivo de sessão; 4) agente padrão das configurações do Kiro
+    const fromFile = findAgentName(readSessionFile(this.sessionsDir, s.id));
+    if (fromFile) {
+      s.agent = fromFile;
+      s.agentSource = 'arquivo de sessão';
+      return;
+    }
+    const fromSettings = readDefaultAgent(this.settingsFile);
+    if (fromSettings) {
+      s.agent = fromSettings;
+      s.agentSource = 'agente padrão (settings/cli.json)';
+    }
   }
 
   #findParent(id, cwd, payload, t) {

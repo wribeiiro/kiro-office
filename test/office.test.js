@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeEvent, toolCategory, summarizeInput } from '../src/events.js';
-import { SessionStore, STALE_MS, LEAVE_MS, RETURN_MS, AGENT_RETRY_MS, readParentFromSessionFile, findAgentName } from '../src/store.js';
+import { SessionStore, STALE_MS, LEAVE_MS, RETURN_MS, AGENT_RETRY_MS, readParentFromSessionFile, findAgentName, readDefaultAgent } from '../src/store.js';
 import { createOfficeServer } from '../src/server.js';
 import { installHooks, uninstallHooks, listHooks, TRIGGERS } from '../src/hooks-installer.js';
 
@@ -352,4 +352,45 @@ test('agente em session_state.agent_name (formato real do Kiro CLI) e null apare
   const keys = store.debug().sessions[0].sessionFileKeys;
   assert.deepEqual(keys.find((k) => k.key === 'session_state.goal'), { key: 'session_state.goal', type: 'null' });
   assert.equal(store.snapshot().sessions[0].agent, 'generic-tech-lead');
+});
+
+test('KIRO_AGENT_ENGINE não é o nome do agente; --agent e o agente padrão das configurações são', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-home-'));
+  const sessionsDir = path.join(root, 'sessions', 'cli');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.mkdirSync(path.join(root, 'settings'));
+  const store = new SessionStore({ sessionsDir });
+  const agentOf = (id) => store.snapshot().sessions.find((s) => s.id === id);
+
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'a', cwd: '/x', tool_name: 'read_file', _env: { KIRO_AGENT_ENGINE: 'kas' } });
+  assert.equal(agentOf('a').agent, null);
+
+  fs.writeFileSync(path.join(root, 'settings', 'cli.json'), JSON.stringify({ 'chat.defaultAgent': 'generic-tech-lead' }));
+  assert.equal(readDefaultAgent(path.join(root, 'settings', 'cli.json')), 'generic-tech-lead');
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'b', cwd: '/x', tool_name: 'read_file' });
+  assert.equal(agentOf('b').agent, 'generic-tech-lead');
+  assert.match(agentOf('b').agentSource, /padrão/);
+
+  // --agent na linha de comando tem prioridade e corrige o padrão
+  store.apply({ hook_event_name: 'PreToolUse', session_id: 'b', cwd: '/x', tool_name: 'read_file', _agent: 'reviewer' });
+  assert.equal(agentOf('b').agent, 'reviewer');
+});
+
+test('send.js acha --agent subindo a árvore de processos', { skip: process.platform !== 'linux' }, async () => {
+  const { server, close } = createOfficeServer({ store: new SessionStore({ sessionsDir: null }) });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    // simula "kiro-cli chat --agent meu-agente" como processo pai do hook
+    const script = `process.stdin.pipe(require('child_process').spawn(process.execPath, [${JSON.stringify(path.join(ROOT, 'hooks', 'send.js'))}, 'PreToolUse'], { stdio: ['pipe', 'inherit', 'inherit'] }).stdin)`;
+    await new Promise((resolve) => {
+      const child = spawn(process.execPath, ['-e', script, 'chat', '--agent', 'meu-agente'], { env: { ...process.env, KIRO_OFFICE_PORT: String(port) } });
+      child.on('exit', resolve);
+      child.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'z', cwd: '/x', tool_name: 'read_file' }));
+    });
+    const state = await (await fetch(`http://127.0.0.1:${port}/api/state`)).json();
+    assert.equal(state.sessions[0].agent, 'meu-agente');
+  } finally {
+    close();
+  }
 });
