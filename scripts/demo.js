@@ -34,7 +34,8 @@ async function runSession(i) {
   await sleep(i * 1200);
   await ev('SessionStart');
   for (let turn = 0; turn < 4; turn++) {
-    await sleep(1500 + Math.random() * 2500);
+    // pausas longas entre turnos para os fantasmas irem ao café
+    await sleep(turn === 0 ? 1500 : 3000 + Math.random() * 15000);
     await ev('UserPromptSubmit', { prompt: pick(PROMPTS) });
     await sleep(1500);
     const steps = 2 + Math.floor(Math.random() * 4);

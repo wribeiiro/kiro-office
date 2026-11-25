@@ -1,8 +1,8 @@
 # Kiro Office
 
-Um escritório em pixel-art, rodando localmente, onde cada sessão do **Kiro CLI** vira um personagem animado. Ele digita quando o agente escreve código, lê quando busca arquivos, mostra o terminal quando roda comandos e levanta a mão com um **"!"** quando precisa da sua permissão.
+Um escritório em pixel-art, rodando localmente, onde cada sessão do **Kiro CLI** vira um fantasminha. Ele digita quando o agente escreve código, lê quando busca arquivos, mostra o terminal quando roda comandos e levanta a mãozinha com um **"!"** quando precisa da sua permissão. Quando fica ocioso, vai flutuando até o **café** tomar um cafezinho, e volta para a mesa assim que chega um novo prompt.
 
-Inspirado no [Pixel Agents](https://github.com/pablodelucca/pixel-agents), que hoje só suporta o Claude Code. Este é um MVP próprio para o Kiro CLI, sem dependências e sem assets de terceiros: todos os sprites são desenhados em código.
+Inspirado no [Pixel Agents](https://github.com/pablodelucca/pixel-agents), que hoje só suporta o Claude Code. Este é um MVP próprio para o Kiro CLI, sem dependências e sem assets de terceiros: os fantasminhas e o cenário são desenhados em código.
 
 ![Kiro Office](docs/screenshot.png)
 
@@ -17,15 +17,15 @@ kiro-cli ──(hooks)──▶ hooks/send.js ──POST──▶ servidor local
 3. O **servidor** (Node puro) guarda o estado por `session_id` e transmite para o navegador via Server-Sent Events.
 4. O **navegador** desenha o escritório em canvas e mostra um painel com o log de cada sessão.
 
-| Evento do Kiro CLI | Personagem |
+| Evento do Kiro CLI | Fantasminha |
 |---|---|
-| `SessionStart` | entra e senta na mesa |
+| `SessionStart` | entra pela porta do café e flutua até a mesa |
 | `UserPromptSubmit` | pensando (balão "...") |
 | `PreToolUse` | `fs_read`/`grep` → lendo · `fs_write`/`str_replace` → escrevendo · `execute_bash` → terminal · `web_*` → web · `mcp_*` → MCP · `use_subagent` → delegando |
 | `PostToolUse` | volta a pensar |
 | `PermissionRequest` | mão levantada + **"!"** vermelho (a aba do navegador pisca) |
-| `Stop` | comemora ✓ e fica ocioso |
-| `SessionEnd` | sai do escritório |
+| `Stop` | comemora ✓; depois de alguns segundos ocioso, vai para o café ☕ |
+| `SessionEnd` | sai pela porta e some |
 
 ## Requisitos
 
